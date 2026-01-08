@@ -1,7 +1,7 @@
 #
 # haystack::RefKind - Native Python implementation
 #
-# This adds the missing defVal() override. The Fantom source's Kind.defVal()
+# This adds the missing defVal() override. The Fantom source's Kind.def_val()
 # calls type.make, but Ref.make() requires id/dis arguments.
 #
 # UPSTREAM FIX NEEDED: Add to RefKind in haxall/src/core/haystack/fan/Kind.fan:
@@ -22,13 +22,13 @@ class RefKind(Kind):
         return RefKind()
 
     @staticmethod
-    def makeTag(tag):
+    def make_tag(tag):
         inst = object.__new__(RefKind)
         inst._ctor_init()
-        inst._makeTag_body(tag)
+        inst._make_tag_body(tag)
         return inst
 
-    def _makeTag_body(self, tag):
+    def _make_tag_body(self, tag):
         super().__init__("Ref", Type.find("xeto::Ref"), (("Ref<" + tag) + ">"))
         self._tag = tag
 
@@ -46,32 +46,32 @@ class RefKind(Kind):
         else:
             self._tag = _val_
 
-    def toTagOf(self, tag):
-        return self.makeTag(tag)
+    def to_tag_of(self, tag):
+        return self.make_tag(tag)
 
-    def isRef(self):
+    def is_ref(self):
         return True
 
-    def defVal(self):
+    def def_val(self):
         """Return Ref.defVal instead of type.make (which requires args)."""
-        return Ref.defVal()
+        return Ref.def_val()
 
-    def valToStr(self, val):
-        return ObjUtil.coerce(val, "xeto::Ref").toCode()
+    def val_to_str(self, val):
+        return ObjUtil.coerce(val, "xeto::Ref").to_code()
 
-    def valToDis(self, val, meta=None):
+    def val_to_dis(self, val, meta=None):
         if meta is None:
             meta = __import__('fan.haystack.Etc', fromlist=['Etc']).Etc.dict0()
         return ObjUtil.coerce(val, "xeto::Ref").dis()
 
-    def valToZinc(self, val):
-        return ObjUtil.coerce(val, "xeto::Ref").toZinc()
+    def val_to_zinc(self, val):
+        return ObjUtil.coerce(val, "xeto::Ref").to_zinc()
 
-    def valToJson(self, val):
-        return ObjUtil.coerce(val, "xeto::Ref").toJson()
+    def val_to_json(self, val):
+        return ObjUtil.coerce(val, "xeto::Ref").to_json()
 
-    def valToAxon(self, val):
-        return ObjUtil.coerce(val, "xeto::Ref").toCode()
+    def val_to_axon(self, val):
+        return ObjUtil.coerce(val, "xeto::Ref").to_code()
 
 
 # Type metadata registration for reflection

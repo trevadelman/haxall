@@ -1,7 +1,7 @@
 #
 # haystack::CoordKind - Native Python implementation
 #
-# This adds the missing defVal() override. The Fantom source's Kind.defVal()
+# This adds the missing defVal() override. The Fantom source's Kind.def_val()
 # calls type.make, but Coord.make() requires lat/lng arguments.
 #
 # UPSTREAM FIX NEEDED: Add to CoordKind in haxall/src/core/haystack/fan/Kind.fan:
@@ -22,16 +22,16 @@ class CoordKind(Kind):
     def __init__(self):
         super().__init__("Coord", Type.find("haystack::Coord"))
 
-    def defVal(self):
+    def def_val(self):
         """Return Coord.defVal instead of type.make (which requires args)."""
         from fan.haystack.Coord import Coord
-        return Coord.defVal()
+        return Coord.def_val()
 
-    def valToJson(self, val):
-        return ("c:" + ObjUtil.coerce(val, "haystack::Coord").toLatLgnStr())
+    def val_to_json(self, val):
+        return ("c:" + ObjUtil.coerce(val, "haystack::Coord").to_lat_lgn_str())
 
-    def valToAxon(self, val):
-        return (("coord(" + ObjUtil.coerce(val, "haystack::Coord").toLatLgnStr()) + ")")
+    def val_to_axon(self, val):
+        return (("coord(" + ObjUtil.coerce(val, "haystack::Coord").to_lat_lgn_str()) + ")")
 
 
 # Type metadata registration for reflection

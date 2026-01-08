@@ -1,7 +1,7 @@
 #
 # haystack::XStrKind - Native Python implementation
 #
-# This adds the missing defVal() override. The Fantom source's Kind.defVal()
+# This adds the missing defVal() override. The Fantom source's Kind.def_val()
 # calls type.make, but XStr.make() requires type/val arguments.
 #
 # UPSTREAM FIX NEEDED: Add to XStrKind in haxall/src/core/haystack/fan/Kind.fan:
@@ -23,21 +23,21 @@ class XStrKind(Kind):
     def __init__(self):
         super().__init__("XStr", Type.find("haystack::XStr"))
 
-    def isXStr(self):
+    def is_x_str(self):
         return True
 
-    def defVal(self):
+    def def_val(self):
         """Return XStr.defVal instead of type.make (which requires args)."""
         from fan.haystack.XStr import XStr
-        return XStr.defVal()
+        return XStr.def_val()
 
-    def valToJson(self, val):
+    def val_to_json(self, val):
         x = ObjUtil.coerce(val, "haystack::XStr")
         return ((("x:" + x._type_) + ":") + x._val)
 
-    def valToAxon(self, val):
+    def val_to_axon(self, val):
         x = ObjUtil.coerce(val, "haystack::XStr")
-        return (((("xstr(" + Str.toCode(x._type_)) + ", ") + Str.toCode(x._val)) + ")")
+        return (((("xstr(" + Str.to_code(x._type_)) + ", ") + Str.to_code(x._val)) + ")")
 
 
 # Type metadata registration for reflection

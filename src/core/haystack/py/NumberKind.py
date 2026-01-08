@@ -1,7 +1,7 @@
 #
 # haystack::NumberKind - Native Python implementation
 #
-# This adds the missing defVal() override. The Fantom source's Kind.defVal()
+# This adds the missing defVal() override. The Fantom source's Kind.def_val()
 # calls type.make, but Number.make() requires a val argument.
 #
 # UPSTREAM FIX NEEDED: Add to NumberKind in haxall/src/core/haystack/fan/Kind.fan:
@@ -24,31 +24,31 @@ class NumberKind(Kind):
     def __init__(self):
         super().__init__("Number", Type.find("haystack::Number"))
 
-    def isNumber(self):
+    def is_number(self):
         return True
 
-    def defVal(self):
+    def def_val(self):
         """Return Number.defVal instead of type.make (which requires args)."""
         from fan.haystack.Number import Number
-        return Number.defVal()
+        return Number.def_val()
 
-    def valToDis(self, val, meta=None):
+    def val_to_dis(self, val, meta=None):
         if meta is None:
             meta = __import__('fan.haystack.Etc', fromlist=['Etc']).Etc.dict0()
-        return ObjUtil.coerce(val, "haystack::Number").toLocale(ObjUtil.coerce(meta["format"], "sys::Str?"))
+        return ObjUtil.coerce(val, "haystack::Number").to_locale(ObjUtil.coerce(meta["format"], "sys::Str?"))
 
-    def valToJson(self, val):
-        return ObjUtil.coerce(val, "haystack::Number").toJson()
+    def val_to_json(self, val):
+        return ObjUtil.coerce(val, "haystack::Number").to_json()
 
-    def valToAxon(self, val):
-        f = ObjUtil.coerce(val, "haystack::Number").toFloat()
-        if Float.isNaN(f):
+    def val_to_axon(self, val):
+        f = ObjUtil.coerce(val, "haystack::Number").to_float()
+        if Float.is_na_n(f):
             return "nan()"
-        if (f == Float.posInf()):
+        if (f == Float.pos_inf()):
             return "posInf()"
-        if (f == Float.negInf()):
+        if (f == Float.neg_inf()):
             return "negInf()"
-        return ObjUtil.toStr(val)
+        return ObjUtil.to_str(val)
 
 
 # Type metadata registration for reflection

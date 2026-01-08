@@ -1,7 +1,7 @@
 #
 # haystack::BinKind - Native Python implementation
 #
-# This adds the missing defVal() override. The Fantom source's Kind.defVal()
+# This adds the missing defVal() override. The Fantom source's Kind.def_val()
 # calls type.make, but Bin.make() requires a mime argument.
 #
 # UPSTREAM FIX NEEDED: Add to BinKind in haxall/src/core/haystack/fan/Kind.fan:
@@ -23,22 +23,22 @@ class BinKind(Kind):
     def __init__(self):
         super().__init__("Bin", Type.find("haystack::Bin"))
 
-    def isXStr(self):
+    def is_x_str(self):
         return True
 
-    def defVal(self):
+    def def_val(self):
         """Return Bin.defVal instead of type.make (which requires args)."""
         from fan.haystack.Bin import Bin
-        return Bin.defVal()
+        return Bin.def_val()
 
-    def valToZinc(self, val):
-        return (("Bin(" + Str.toCode(ObjUtil.coerce(val, "haystack::Bin")._mime.toStr())) + ")")
+    def val_to_zinc(self, val):
+        return (("Bin(" + Str.to_code(ObjUtil.coerce(val, "haystack::Bin")._mime.to_str())) + ")")
 
-    def valToJson(self, val):
-        return ("b:" + ObjUtil.coerce(val, "haystack::Bin")._mime.toStr())
+    def val_to_json(self, val):
+        return ("b:" + ObjUtil.coerce(val, "haystack::Bin")._mime.to_str())
 
-    def valToAxon(self, val):
-        return (("xstr(\"Bin\"," + Str.toCode(ObjUtil.coerce(val, "haystack::Bin")._mime.toStr())) + ")")
+    def val_to_axon(self, val):
+        return (("xstr(\"Bin\"," + Str.to_code(ObjUtil.coerce(val, "haystack::Bin")._mime.to_str())) + ")")
 
 
 # Type metadata registration for reflection
