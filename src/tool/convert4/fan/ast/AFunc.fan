@@ -65,14 +65,15 @@ class AFunc
 
     doc := def["doc"] as Str ?: ""
     src := def["src"] as Str ?: throw Err("Missing axon src")
+    axon := ast.config.ns.io.readAxon(src)->axon
 
-    fn := Parser(Loc.eval, src.in).parseTop(name)
+    fn := Parser(Loc.eval, src.in).parseTopWithParams(name)
     params := fn.params.map |x->AParam| { AParam(x.name, AType.obj, x.def?.toStr) }
     returns := AParam("returns", AType.obj, null)
 
     meta := Etc.dictFromMap(mapMeta(ast, def))
 
-    func := make(name, doc, meta, params, returns, src)
+    func := make(name, doc, meta, params, returns, axon)
     ext.funcs.add(func)
   }
 
@@ -158,6 +159,7 @@ class AFunc
       if (n == "refresh") return
       if (n == "doc")  return
       if (n == "src")  return
+      if (n == "hisFuncReady") return
 
       // if its defined in axon/config; otherwise stuff into defMeta
       if (isFuncMeta(ast, n))

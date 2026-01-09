@@ -106,6 +106,27 @@ const class DocUtil
     qnameToUri(qname, path.join("."))
   }
 
+  ** Convert linker scope to uri
+  internal static Uri linkerToUri(Lib? lib, Obj? doc)
+  {
+    if (lib == null) return indexUri
+    if (doc == null) return libToUri(lib.name)
+    if (doc is Spec) return specToUri(doc)
+    return toUri(lib.name, ((DocNamespaceChapter)doc).name)
+  }
+
+  ** Convert spec or instance qualified name to its normalized URI
+  internal static Uri toUri(Str lib, Str name, Str? frag := null)
+  {
+    StrBuf(2+lib.size+name.size)
+      .addChar('/')
+      .add(lib)
+      .addChar('/')
+      .add(name)
+      .joinNotNull(frag, "#")
+      .toStr.toUri
+  }
+
   ** Convert spec or instance qualified name to its normalized URI
   internal static Uri qnameToUri(Str qname, Str? frag := null)
   {
@@ -130,6 +151,21 @@ const class DocUtil
   static Str fromUriName(Str n)
   {
     n.equalsIgnoreCase("_index") ? n[1..-1] : n
+  }
+
+  ** Normalize HTML href URIs
+  static Uri htmlUri(Uri cur, Uri uri, Str? ext := ".html")
+  {
+   // we can assume one or two level tree of /index or /lib/page
+    if (uri.path.isEmpty) return uri
+    s := StrBuf()
+    if (cur.path.first != uri.path.first)
+    {
+      if (cur.path.size > 1) s.add("../")
+      if (uri.path.size > 1) s.add(uri.path[0]).addChar('/')
+    }
+    s.add(uri.name).joinNotNull(ext, "").joinNotNull(uri.frag, "#")
+    return s.toStr.toUri
   }
 
 //////////////////////////////////////////////////////////////////////////

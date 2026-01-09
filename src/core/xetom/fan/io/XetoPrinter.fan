@@ -209,7 +209,7 @@ class XetoPrinter
   }
 
 //////////////////////////////////////////////////////////////////////////
-// Dict
+// AST Dict
 //////////////////////////////////////////////////////////////////////////
 
   ** Print dict AST representation of spec or instance
@@ -310,6 +310,97 @@ class XetoPrinter
 
   ** Always skip these which should be encoded outside of meta
   static const Str[] metaSkipAst := ["id", "mod", "rt", "name", "ofs", "base", "type", "slots", "spec", "doc", "maybe", "val"]
+
+//////////////////////////////////////////////////////////////////////////
+// AST Axon Func
+//////////////////////////////////////////////////////////////////////////
+
+  Void axon(Dict ast)
+  {
+    doc   := ast["doc"] as Str
+    slots := ast["slots"] as Grid ?: Etc.emptyGrid
+    axon  := ast["axon"] as Str ?: "null"
+
+    if (doc != null) w("/*").nl.w(doc).nl.w("*/").nl
+
+    wc('(')
+    Dict? returns
+    first := true
+    slots.each |slot|
+    {
+      name := slot->name
+      if (name == "returns")
+      {
+        returns = slot
+      }
+      else
+      {
+        if (first) first = false; else wc(',').sp
+        axonParam(name, slot)
+      }
+    }
+    wc(')')
+    if (returns != null) axonParam("returns", returns)
+    w(" => ")
+    w(axon)
+  }
+
+  private Void axonParam(Str name, Dict meta)
+  {
+    isReturn := name == "returns"
+    type := "sys::Obj"
+    maybe := false
+    Str? def := null
+    metaNames := Str[,]
+
+    // walk meta and extra specials
+    meta.each |v, n|
+    {
+      if (n == "name") return
+      if (n == "type")  { type = v.toStr; return }
+      if (n == "maybe") { maybe = true; return }
+      if (n == "axon" && !isReturn) { def = v.toStr; return }
+      metaNames.add(n)
+    }
+
+    // name
+    if (!isReturn) w(name)
+
+    // if everything else is defaults, we are done
+    needType := !metaNames.isEmpty || type != "sys::Obj" || !maybe
+    if (!needType && def == null)
+      return
+
+    // colon type <meta> def
+    wc(':').sp
+    if (needType)
+    {
+      w(typeName(type))
+      if (maybe) wc('?')
+    }
+
+    // meta
+    if (!metaNames.isEmpty)
+    {
+      sp.wc('<')
+      first := true
+      metaNames.each |n|
+      {
+        if (first) first = false; else wc(',').sp
+        v := meta[n]
+        w(n)
+        if (v != Marker.val) wc(':').quoted(v.toStr)
+      }
+      wc('>')
+    }
+
+    // default
+    if (def != null)
+    {
+      if (needType) sp
+      w(def)
+    }
+  }
 
 //////////////////////////////////////////////////////////////////////////
 // Literals
@@ -480,9 +571,7 @@ class XetoPrinter
     simple := n[colons+2..-1]
 
     // if multiple matches stick with qname
-    // TODO: cannot do this during compile; need to refactor
-    // all the async loading first and simplify the MNamespace
-    // if (ns.unqualifiedTypes(simple).size > 1) return n
+    if (ns.unqualifiedTypes(simple).size > 1) return n
 
     // use simple name
     return simple

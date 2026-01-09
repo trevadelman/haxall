@@ -108,13 +108,22 @@ class IOTest : AbstractXetoTest
 
   Obj? verifyIO(Obj? val)
   {
+    ns := server.ns
+
     // binary format
     buf := Buf()
-    XetoBinaryWriter(buf.out).writeVal(val)
+    ns.io.writeBinary(buf.out, val)
     // echo("--> $val [$buf.size bytes]")
-    binary := XetoBinaryReader(buf.flip.in).readVal
+    binary := ns.io.readBinary(buf.flip.in)
     // echo("  > $binary | ${binary?.typeof}")
     verifyValEq(val, binary)
+
+    // JSON format
+    /*
+    jsonStr := ns.io.writeJsonToStr(val, Etc.dict1("prettyx", Marker.val))
+    json := ns.io.readJson(jsonStr.in, ns.specOf(val))
+    verifyValEq(val, binary)
+    */
 
     // Xeto format does not support null
     if (val == null) return binary
@@ -132,29 +141,28 @@ class IOTest : AbstractXetoTest
     if (val is Grid) return binary
 
     // xeto text format
-    ns := server.ns
     buf.clear
-    ns.writeData(buf.out, val)
+    ns.io.writeXeto(buf.out, val)
     str := buf.flip.readAllStr
     opts := dict1("externRefs", m)
-    x := server.ns.compileData(str, opts)
+    x := server.ns.io.readXeto(str, opts)
     verifyValEq(val, x)
 
     // compileDicts
     if (val is Dict)
     {
-      dicts := ns.compileDicts(str, opts)
+      dicts := ns.io.readXetoDicts(str, opts)
       verifyEq(dicts.size, 1)
       verifyDictEq(dicts[0], val)
     }
     else if (val is List && ((List)val).all { it is Dict })
     {
-      dicts := ns.compileDicts(str, opts)
+      dicts := ns.io.readXetoDicts(str, opts)
       verifyDictsEq(dicts, val)
     }
     else
     {
-      verifyErr(IOErr#) { ns.compileDicts(str, opts) }
+      verifyErr(IOErr#) { ns.io.readXetoDicts(str, opts) }
     }
     return binary
   }

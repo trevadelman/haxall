@@ -30,6 +30,7 @@ const class MNamespace : Namespace, CNamespace
   {
     this.envRef = env
     this.opts = opts
+    this.io = MXetoIO(this)
     this.companionRecs = opts["companionRecs"]
 
     // order versions by depends and check all dependencies
@@ -84,6 +85,8 @@ const class MNamespace : Namespace, CNamespace
 
   override XetoEnv env() { envRef }
   const MEnv envRef
+
+  override const XetoIO io
 
   Bool isRemote() { env.isRemote }
 
@@ -445,43 +448,6 @@ const class MNamespace : Namespace, CNamespace
   }
 
 //////////////////////////////////////////////////////////////////////////
-// Compile
-//////////////////////////////////////////////////////////////////////////
-
-  override Dict[] compileDicts(Str src, Dict? opts := null)
-  {
-    val := compileData(src, opts)
-    if (val is List) return ((List)val).map |x->Dict| { x as Dict ?: throw IOErr("Expecting Xeto list of dicts, not ${x?.typeof}") }
-    if (val is Dict) return Dict[val]
-    throw IOErr("Expecting Xeto dict data, not ${val?.typeof}")
-  }
-
-  override Void writeData(OutStream out, Obj val, Dict? opts := null)
-  {
-    XetoPrinter(this, out, opts ?: Etc.dict0).data(val)
-  }
-
-  override Void print(Obj? val, OutStream out := Env.cur.out, Dict? opts := null)
-  {
-    Printer(this, out, opts ?: Etc.dict0).print(val)
-  }
-
-  override Dict[] parseToDicts(Str src, Dict? opts := null)
-  {
-    envRef.parseToDicts(this, src, opts ?: Etc.dict0)
-  }
-
-  override final Obj? compileData(Str src, Dict? opts := null)
-  {
-    envRef.compileData(this, src, opts ?: Etc.dict0)
-  }
-
-  override final Lib compileTempLib(Str src, Dict? opts := null)
-  {
-    envRef.compileTempLib(this, src, opts ?: Etc.dict0)
-  }
-
-//////////////////////////////////////////////////////////////////////////
 // CNamespace
 //////////////////////////////////////////////////////////////////////////
 
@@ -496,6 +462,11 @@ const class MNamespace : Namespace, CNamespace
 //////////////////////////////////////////////////////////////////////////
 // Utils
 //////////////////////////////////////////////////////////////////////////
+
+  override final Lib compileTempLib(Str src, Dict? opts := null)
+  {
+    envRef.compileTempLib(this, src, opts ?: Etc.dict0)
+  }
 
   override Void dump(OutStream out := Env.cur.out)
   {

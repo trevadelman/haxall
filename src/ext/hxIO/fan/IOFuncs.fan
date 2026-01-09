@@ -377,27 +377,27 @@ const class IOFuncs
 
   **
   ** Read a Xeto data file into memory as a Haystack data type.
-  ** See `xeto::Namespace.compileData` for details and options.
+  ** See `xeto::XetoIO.readXeto` for details and options.
   **
   @Api @Axon { admin = true }
   static Obj? ioReadXeto(Obj? handle, Obj? opts := null)
   {
     toHandle(handle).withIn |in|
     {
-      Context.cur.ns.compileData(in.readAllStr, opts)
+      Context.cur.ns.io.readXeto(in.readAllStr, opts)
     }
   }
 
   **
   ** Write value to a Xeto text format file.
-  ** See `xeto::Namespace.writeData` for details and options.
+  ** See `xeto::XetoIO.writeXeto` for details and options.
   **
   @Api @Axon { admin = true }
   static Obj? ioWriteXeto(Obj? val, Obj? handle, Obj? opts := null)
   {
     return toHandle(handle).withOut |out|
     {
-      Context.cur.ns.writeData(out, val, opts)
+      Context.cur.ns.io.writeXeto(out, val, opts)
     }
   }
 

@@ -27,8 +27,8 @@ internal class Parse : Step
     // parse lib of types or data value
     if (mode.isLibPragma)
       parseLib(input)
-    else if (mode.isParseDicts)
-      parseDicts(input)
+    else if (mode.isAst)
+      parseAst(input)
     else
       parseData(input)
   }
@@ -54,7 +54,7 @@ internal class Parse : Step
     compiler.pragma = pragma
   }
 
-  private Void parseDicts(File input)
+  private Void parseAst(File input)
   {
     // stub lib doc
     lib := ALib(compiler, FileLoc.synthetic, compiler.libName)
@@ -223,7 +223,7 @@ internal class Parse : Step
     // dict back to Xeto source code to parse
     name := rec["name"] as Str ?: throw Err("Rec missing name: $rec.id.toZinc")
     s := StrBuf()
-    XetoPrinter(ns, s.out, Etc.dict1("noInferMeta", Marker.val)).ast(rec)
+    XetoPrinter(ns, s.out, companionPrintOpts).ast(rec)
     parse(FileLoc(name), s.toStr, lib, compiler.srcBuildVars)
   }
 
@@ -231,7 +231,7 @@ internal class Parse : Step
   {
     if (recs.isEmpty) return
     s := StrBuf()
-    out := XetoPrinter(ns, s.out, Etc.dict1("noInferMeta", Marker.val))
+    out := XetoPrinter(ns, s.out, companionPrintOpts)
     out.w("+Funcs {").nl
     recs.each |rec| { out.ast(rec) }
     out.w("}")
@@ -247,6 +247,11 @@ internal class Parse : Step
     meta := pragma.metaInit
     meta.set("version", AScalar(loc, null, "0.0.0"))
     return pragma
+  }
+
+  private once Dict companionPrintOpts()
+  {
+    Etc.dict2("noInferMeta", Marker.val, "qnameForce", Marker.val)
   }
 }
 

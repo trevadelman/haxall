@@ -29,6 +29,9 @@ const mixin Namespace
   ** modified.  It is **not** a digest of the lib contents.
   abstract Str digest()
 
+  ** Access I/O operations using this namespace
+  abstract XetoIO io()
+
 //////////////////////////////////////////////////////////////////////////
 // Libs
 //////////////////////////////////////////////////////////////////////////
@@ -182,44 +185,13 @@ const mixin Namespace
   abstract ValidateReport validateAll(Dict[] subjects, Dict? opts := null)
 
 //////////////////////////////////////////////////////////////////////////
-// Compile
+// Utils
 //////////////////////////////////////////////////////////////////////////
-
-  ** Compile a Xeto data file into an in-memory value. All dependencies are
-  ** resolved against this namespace.  Raise exception if there are any
-  ** syntax or semantic errors.  If the file contains a scalar value or
-  ** one dict, then it is returned as the value.  If the file contains
-  ** two or more dicts then return a Dict[] of the instances.
-  **
-  ** Options
-  **   - externRefs: marker to allow unresolved refs to compile
-  abstract Obj? compileData(Str src, Dict? opts := null)
-
-  ** Convenience for `compileData` but always returns data as list of dicts.
-  ** If the data is not a Dict nor list of Dicts, then raise an exception.
-  abstract Dict[] compileDicts(Str src, Dict? opts := null)
-
-  ** Parse one or more specs/instances to their AST representation as dicts
-  ** Options:
-  **   - libName: for internal qnames (default to proj)
-  abstract Dict[] parseToDicts(Str src, Dict? opts := null)
 
   ** Compile Xeto source code into a temp library.  All dependencies are
   ** resolved against this namespace.  Raise exception if there are any
   ** syntax or semantic errors.
   @NoDoc abstract Lib compileTempLib(Str src, Dict? opts := null)
-
-  ** Write instance data in Xeto text format to an output stream.  If the
-  ** value is a Dict[], then it is flattened in the output.  Use `compileData`
-  ** to read data from Xeto text format.
-  abstract Void writeData(OutStream out, Obj val, Dict? opts := null)
-
-  ** Pretty print object to output stream.
-  @NoDoc abstract Void print(Obj? val, OutStream out := Env.cur.out, Dict? opts := null)
-
-//////////////////////////////////////////////////////////////////////////
-// Utils
-//////////////////////////////////////////////////////////////////////////
 
   ** Debug dump of libs and status
   @NoDoc abstract Void dump(OutStream out := Env.cur.out)

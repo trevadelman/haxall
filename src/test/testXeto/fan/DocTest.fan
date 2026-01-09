@@ -190,11 +190,9 @@ class DocTest : AbstractXetoTest
     siteRef := n.slots.getChecked("siteRef")
     verifyEq(siteRef.parent.qname, "ph::Equip")
     verifyEq(siteRef.base.dis, "ph::PhEntity.siteRef")
-    // TODO
-    //verifyEq(siteRef.base.uri, `/ph/PhEntity.siteRef`)
+    verifyEq(siteRef.base.uri, `/ph/PhEntity.siteRef`)
     verifyEq(siteRef.type.qname, "sys::Ref")
 
-    verifyEq(n.doc.text, "Equip with *points*")
     verifyEq(n.doc.html.trim, "<p>Equip with <em>points</em></p>")
   }
 
@@ -219,7 +217,10 @@ class DocTest : AbstractXetoTest
     if (def is Spec)
     {
       x := (Spec)def
-      verifyEq(n.link.uri, "/$x.lib.name/$x.name".toUri)
+      if (x.name.lower == "index")
+        verifyEq(n.link.uri, "/$x.lib.name/_$x.name".toUri)
+      else
+        verifyEq(n.link.uri, "/$x.lib.name/$x.name".toUri)
       verifyEq(n.link.dis, x.name)
     }
     else if (def is Dict)
@@ -235,14 +236,6 @@ class DocTest : AbstractXetoTest
     {
       echo("TODO: verfiySummary $n.link.uri | $def.typeof")
     }
-  }
-
-  Void verifySummaryText(DocMarkdown n, Str? doc)
-  {
-    if (doc == null) doc = ""
-    // echo("-- $n.text.toCode")
-    // echo("   $doc.toCode")
-    verify(doc.startsWith(n.text))
   }
 
   Void verifyTypeRefs(Spec spec, DocSpec n)
@@ -405,8 +398,219 @@ class DocTest : AbstractXetoTest
   Void verifyChapter(DocChapter c)
   {
     verifyEq(c.qname, "doc.xeto::Namespaces")
-    verifyEq(c.doc.text.contains("A namespace is defined by a list"), true)
+    verifyEq(c.doc.html.contains("A namespace is defined by a list"), true)
   }
+
+//////////////////////////////////////////////////////////////////////////
+// IndexHtmlParser
+//////////////////////////////////////////////////////////////////////////
+
+  Void testIndexerHtmlParser()
+  {
+    // if no heading we make one up
+    verifyIndexerHtmlParser(
+      Str<|<p>foo bar</p>|>,
+      Str<|<h1> ""
+           foo bar
+          |>)
+
+    // simple heading
+    verifyIndexerHtmlParser(
+      Str<|<h1>title <em>here</em>!</h1>
+           <p>para #1</p>
+           <ul><li>foo</li><li>bar</li></ul>
+           <p>para #2</p>|>,
+      Str<|<h1> "title here !"
+           para #1 foo bar para #2
+          |>)
+
+
+    // multiple headings
+    verifyIndexerHtmlParser(
+      Str<|<h1>title <em>here</em>!</h1>
+           <p>para #1</p>
+           <ul><li>foo</li><li>bar</li></ul>
+           <p>para #2</p>
+
+           <h1>Simple H1</h1>
+           <p>Foo <b>bold</b> bar</p>
+
+           <h2 id='anchor'><b>Heading 2</b></h2>
+           <div>
+             <p>Lorem</p>
+             <p>ipsum</p>
+           </div>
+           <div>
+             <div><p>dolor sit amet,</p></div>
+             <div><p>consectetu</p></div>
+           </div>
+           |>,
+      Str<|<h1> "title here !"
+           para #1 foo bar para #2
+           <h1> "Simple H1"
+           Foo bold bar
+           <h2 id='anchor'> "Heading 2"
+           Lorem ipsum dolor sit amet, consectetu
+          |>)
+  }
+
+  Void verifyIndexerHtmlParser(Str html, Str expect)
+  {
+    // first do sections
+    actual := StrBuf(expect.size)
+    DocIndexerHtmlParser().parseSections(html) |elem, title, body|
+    {
+      actual.add("$elem $title.toCode").add("\n").add(body).add("\n")
+    }
+    verifyEq(actual.toStr, expect)
+
+    // then check whole thing as plaintext
+    allExpect := StrBuf()
+    expect.eachLine |x|
+    {
+      if (x.startsWith("<h")) x = x[x.index("\"")+1..-2].trim
+      if (x.isEmpty) return
+      allExpect.join(x, " ")
+    }
+    allActual := DocIndexerHtmlParser().parseToPlainText(html)
+    verifyEq(allActual, allExpect.toStr)
+  }
+
+//////////////////////////////////////////////////////////////////////////
+// Linker
+//////////////////////////////////////////////////////////////////////////
+
+  Void testLinker()
+  {
+    ns := createNamespace(["ph.points", "hx", "hx.test.xeto", "doc.xeto"])
+    docns = DocNamespace(ns)
+
+    // DocNamespace chapter heading parsing
+    chapters := docns.chapters(ns.lib("hx.test.xeto"))
+    verifySame(docns.chapters(ns.lib("hx.test.xeto")), chapters)
+    verifySame(docns.chapters(ns.lib("sys")), docns.chapters(ns.lib("ph")))
+    chapter := chapters.getChecked("ChapterA")
+    verifyEq(chapter.name, "ChapterA")
+    verifyEq(chapter.uri, `/hx.test.xeto/ChapterA`)
+    verifyEq(chapter.headings["dup"], "Dup")
+    verifyEq(chapter.headings["dup-2"], "Dup")
+    verifyEq(chapter.headings["subsection-3"], "Subsection 3")
+
+    // pass-thru
+    verifyLinker("/foo/bar", "/foo/bar")
+    verifyLinker("http://xeto.dev/", "http://xeto.dev/")
+    verifyLinker("https://xeto.dev/", "https://xeto.dev/")
+
+    // absolute index
+    verifyLinker("ph.points::index", "/ph.points/index")
+    verifyLinker("ph.points::index.bad", null)
+    verifyLinker("ph.points::index#bad", null)
+
+    // absolute spec
+    verifyLinker("sys::Spec", "/sys/Spec")
+    verifyLinker("ph::Equip", "/ph/Equip")
+    verifyLinker("ph.points::NumberPoint", "/ph.points/NumberPoint")
+    verifyLinker("ph::Equip#bad",  null)
+    verifyLinker("ph::Bad", null)
+
+    // absolute slot
+    verifyLinker("sys::Spec.doc", "/sys/Spec#doc")
+    verifyLinker("ph::PhEntity.temp", "/ph/PhEntity#temp")
+    verifyLinker("hx::Funcs.read", "/hx/Funcs#read")
+    verifyLinker("hx.test.xeto::Index", "/hx.test.xeto/_Index")
+    verifyLinker("ph::PhEntity.temp#bad", null)
+    verifyLinker("ph::PhEntity.bad", null)
+
+    // absolute instance
+    verifyLinker("hx.test.xeto::coerce", "/hx.test.xeto/coerce")
+    verifyLinker("hx.test.xeto::coerce.float", null)
+    verifyLinker("hx.test.xeto::coerce#bad", null)
+
+    // functions
+    verifyLinker("readAll()", "/hx/Funcs#readAll")
+    verifyLinker("hx::readAll()", "/hx/Funcs#readAll")
+    verifyLinker("hx::Funcs.readAll()", null)
+    verifyLinker("hx::badFunc()", null)
+    verifyLinker("doc.xeto::badFunc()", null)
+    verifyLinker("bad.lib::readAll()", null)
+    verifyLinker("readAll", null)
+    verifyLinker("badOne()",null)
+    verifyLinker("readAll().bad", null)
+    verifyLinker("readAll()#bad", null)
+    verifyLinker("hx::readAll()#bad", null)
+    verifyLinker("hx::readAll().bad#bad", null)
+
+    // absolute chapter
+    verifyLinker("doc.xeto::Xetodoc", "/doc.xeto/Xetodoc")
+    verifyLinker("doc.xeto::Xetodoc.md", "/doc.xeto/Xetodoc")
+    verifyLinker("doc.xeto::Xetodoc.bad", null)
+    verifyLinker("doc.xeto::Bad", null)
+
+    // absolute chapter frags
+    verifyLinker("doc.xeto::Xetodoc#shortcut-links", "/doc.xeto/Xetodoc#shortcut-links")
+    verifyLinker("doc.xeto::Xetodoc.md#shortcut-links", "/doc.xeto/Xetodoc#shortcut-links")
+    verifyLinker("doc.xeto::Xetodoc#bad", null)
+    verifyLinker("doc.xeto::Xetodoc.md#bad", null)
+    verifyLinker("doc.xeto::Xetodoc.md#Shortcut-Links", null)
+
+    // relative specs
+    lib = ns.lib("ph")
+    verifyLinker("Spec", "/sys/Spec")
+    verifyLinker("Site", "/ph/Site")
+    verifyLinker("NumberPoint", null)
+
+    // relative slots
+    lib = ns.lib("ph")
+    verifyLinker("Spec.doc", "/sys/Spec#doc")
+    verifyLinker("Equip.siteRef", "/ph/Equip#siteRef")
+    verifyLinker("Equip#bad", null)
+    verifyLinker("Equip.bad", null)
+    verifyLinker("Equip.siteRef#bad", null)
+
+    // relative chapters
+    lib = ns.lib("ph")
+    verifyLinker("Xetodoc", null)
+    verifyLinker("Xetodoc.md", null)
+    lib = ns.lib("doc.xeto")
+    verifyLinker("Xetodoc", "/doc.xeto/Xetodoc")
+    verifyLinker("Xetodoc.md", "/doc.xeto/Xetodoc")
+    verifyLinker("Xetodoc#tables", "/doc.xeto/Xetodoc#tables")
+    verifyLinker("Xetodoc.md#tables", "/doc.xeto/Xetodoc#tables")
+    verifyLinker("Xetodoc#bad", null)
+    verifyLinker("Xetodoc.md#bad", null)
+    verifyLinker("#tables", null)
+
+    // frags internal to chapter
+    doc = docns.chapters(lib).getChecked("Xetodoc")
+    verifyLinker("#tables", "#tables")
+    verifyLinker("#shortcut-links", "#shortcut-links")
+    verifyLinker("#bad", null)
+    verifyLinker("#Shortcut-Links", null)
+
+    // error boundary conditions
+    verifyLinker("", null)
+    verifyLinker(":", null)
+    verifyLinker("::", null)
+    verifyLinker("x::", null)
+    verifyLinker("::x", null)
+    verifyLinker("#", null)
+    verifyLinker("x#", null)
+    verifyLinker(".", null)
+    verifyLinker("x.", null)
+    verifyLinker(".x", null)
+    verifyLinker("()", null)
+  }
+
+  Void verifyLinker(Str link, Str? expect)
+  {
+    actual := DocLinker(docns, lib, doc).resolve(link)?.toStr
+    // echo; echo("--> $link"); echo("  > $actual ?= $expect")
+    verifyEq(actual, expect)
+  }
+
+  DocNamespace? docns
+  Lib? lib
+  Obj? doc
 
 //////////////////////////////////////////////////////////////////////////
 // Util

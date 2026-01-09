@@ -70,5 +70,8 @@ const abstract class ThunkFactory
 
   ** Factory hook
   abstract Thunk create(Spec spec, Pod? pod)
+
+  ** Hook for XetoIO.readAxon
+  abstract Dict readAxon(Namespace ns, Str src, Dict opts)
 }
 

@@ -35,6 +35,7 @@ class Parser
 // Parse expression
 //////////////////////////////////////////////////////////////////////////
 
+  ** Parse any expression
   Expr parse()
   {
     r := cur === Token.defcompKeyword ? defcomp("top", Etc.dict0) : expr
@@ -42,7 +43,17 @@ class Parser
     return r
   }
 
-  TopFn parseTop(Str name, Dict meta := Etc.dict0)
+  ** New style top where params come from Xeto
+  TopFn parseTopBody(Str name, FnParam[] params, Dict meta)
+  {
+    curName = name
+    fn := lambdaBody(curLoc, params, meta)
+    if (cur !== Token.eof) throw err("Expecting end of file, not $cur ($curVal)")
+    return fn
+  }
+
+  ** Old style top that includes params and can be defcomp
+  TopFn parseTopWithParams(Str name, Dict meta := Etc.dict0)
   {
     loc := curLoc
     curName = name
@@ -58,11 +69,19 @@ class Parser
       consume(Token.lparen)
       params := params()
       if (cur !== Token.fnEq) throw err("Expecting '(...) =>' top-level function")
-      fn = lamdbaBody(loc, params, meta)
+      consume(Token.fnEq)
+      fn = lambdaBody(loc, params, meta)
     }
 
     if (cur !== Token.eof) throw err("Expecting end of file, not $cur ($curVal)")
     return fn
+  }
+
+  ** Parse either type name, type qname, or default expression
+  protected Expr axonParam()
+  {
+    inAxonParam = true
+    return expr
   }
 
   protected Expr namedExpr(Str name)
@@ -406,12 +425,11 @@ class Parser
   private Expr compareExpr()
   {
     expr := rangeExpr
-    if (inSpec > 0) return expr // don't parse ">" as Gt if inside spec meta
     switch (cur)
     {
       case Token.eq:    consume; return Eq(expr, rangeExpr)
       case Token.notEq: consume; return Ne(expr, rangeExpr)
-      case Token.lt:    consume; return Lt(expr, rangeExpr)
+      case Token.lt:    if (!inAxonParam) { consume; return Lt(expr, rangeExpr) }
       case Token.ltEq:  consume; return Le(expr, rangeExpr)
       case Token.gtEq:  consume; return Ge(expr, rangeExpr)
       case Token.gt:    consume; return Gt(expr, rangeExpr)
@@ -424,7 +442,7 @@ class Parser
   ** Additive expression:
   **   <rangeExpr>  :=  <addExpr> ".." <addExpr>
   **
-  private Expr rangeExpr()
+  internal Expr rangeExpr()
   {
     expr := addExpr
     if (cur === Token.dotDot)
@@ -482,7 +500,7 @@ class Parser
   **   <termExpr>   :=  <termBase> <termChain>*
   **   <termChain>  :=  <call> | <methodCall> | <index> | <tag-get>
   **
-  private Expr termExpr(Expr? start := null)
+  internal Expr termExpr(Expr? start := null)
   {
     expr := start ?: termBase
     while (true)
@@ -593,7 +611,7 @@ class Parser
   ** Function application:
   **   <call>         :=  "(" [<callArg> ("," <callArg>)*] [<lambda>]
   **   <callArg>      :=  <expr> | "_"
-  **   <dotCall>      :=  "." [<nl>] <qname> [<call> | <lamdba-1>]
+  **   <dotCall>      :=  "." [<nl>] <qname> [<call> | <lambda-1>]
   **
   private Expr call(Expr target, Bool isMethod)
   {
@@ -643,9 +661,9 @@ class Parser
     }
     consume(Token.rparen)
 
-    // trailing lamdba
+    // trailing lambda
     if (!isEos && (cur === Token.id || cur === Token.lparen))
-      args.add(lamdba)
+      args.add(lambda)
 
     call := isMethod ? toDotCall(methodName, args, false) : toCall(target, args)
     if (numPartials > 0)
@@ -711,7 +729,7 @@ class Parser
   **   <lambda-1>  :=  <id> "=>" <expr>
   **   <lambda-n>  :=  "(" <params> ")" "=>" <expr>
   **
-  private Fn lamdba()
+  private Fn lambda()
   {
     loc := curLoc
     if (cur === Token.id) return lambda1
@@ -720,50 +738,54 @@ class Parser
       expr := parenExpr
       if (expr is Fn) return expr
     }
-    throw err("Expecting lamdba expr", loc)
+    throw err("Expecting lambda expr", loc)
   }
 
   **
-  ** Single parameter lamdba:
-  **   <lamdba-1>  :=  <id> "=>" <expr>
+  ** Single parameter lambda:
+  **   <lambda-1>  :=  <id> "=>" <expr>
   **
   private Fn lambda1()
   {
     loc := curLoc
     params := [FnParam(consumeId("func parameter name"))]
-    return lamdbaBody(loc, params)
+    consume(Token.fnEq)
+    return lambdaBody(loc, params)
   }
 
   **
   ** Expression grouped by parens which could be either:
   **   <groupedExpr> :=  "(" <expr> ")"
-  **   <lamdba-n>    :=  "(" <params> ")" "=>" <expr>
+  **   <lambda-n>    :=  "(" <params> ")" "=>" <expr>
   **
   private Expr parenExpr()
   {
     loc := curLoc
     consume(Token.lparen)
 
-    // lamdba "()=>" ...
+    // lambda "()=>" ...
     if (cur === Token.rparen && peek === Token.fnEq)
     {
       consume
-      return lamdbaBody(loc, noParams)
+      consume(Token.fnEq)
+      return lambdaBody(loc, noParams)
     }
 
-    // lamdba "(id)=>..."
+    // lambda "(id)=>..."
     if (cur === Token.id && peek === Token.rparen && peekPeek == Token.fnEq)
     {
       id := consumeId("func parameter name")
       consume
-      return lamdbaBody(loc, [FnParam(id)])
+      consume(Token.fnEq)
+      return lambdaBody(loc, [FnParam(id)])
     }
 
-    // lamdba "(id,...)=>..." or "(id:...)=>..."
+    // lambda "(id,...)=>..." or "(id:...)=>..."
     if (cur === Token.id && (peek === Token.comma || peek === Token.colon))
     {
       params := params()
-      return lamdbaBody(loc, params)
+      consume(Token.fnEq)
+      return lambdaBody(loc, params)
     }
 
     // "(expr)" just normal expr grouped by parens
@@ -773,7 +795,7 @@ class Parser
   }
 
   **
-  ** Parse lamdba parameters, the lead '(' must already be consumed
+  ** Parse lambda parameters, the lead '(' must already be consumed
   **
   private FnParam[] params()
   {
@@ -804,11 +826,11 @@ class Parser
 //////////////////////////////////////////////////////////////////////////
 
   **
-  ** Handle a lamdba with current token on '=>'.
+  ** Handle a lambda body with current token right after '=>'.
   ** This is a single point where we handle naming
   ** and lexically scoping all our functions.
   **
-  private Fn lamdbaBody(Loc loc, FnParam[] params, Dict? topMeta := null)
+  private Fn lambdaBody(Loc loc, FnParam[] params, Dict? topMeta := null)
   {
     // create new scope of inner functions
     oldInners := inners
@@ -821,7 +843,6 @@ class Parser
     if (oldFuncName != null) curFuncName = oldFuncName + "." + curFuncName
 
     // parse body
-    consume(Token.fnEq)
     body := expr
 
     // optimize out return if only or last expr
@@ -921,7 +942,7 @@ class Parser
     peekPeek       = tokenizer.next
     peekPeekVal    = tokenizer.val
     peekPeekLine   = tokenizer.line
- }
+  }
 
 //////////////////////////////////////////////////////////////////////////
 // Fields
@@ -935,9 +956,9 @@ class Parser
 
   Token cur  { private set }   // current token
   Obj? curVal { private set }  // current token value
+  Int curLine  { private set } // current token line number
   private Int curIndent        // current token indentation
   private Bool nl := true      // if current first token on new line
-  private Int curLine          // current token line number
 
   Token peek { private set }   // next token
   Obj? peekVal { private set } // next token value
@@ -951,6 +972,6 @@ class Parser
   private Str? curFuncName     // current name of base func
   private Int anonNum          // number of anonymous funcs
   private Fn[] inners := [,]   // current number of funcs inside current
-  private Int inSpec           // if inside spec production
+  private Bool inAxonParam
 }
 
