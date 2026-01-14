@@ -42,6 +42,7 @@ class Build : BuildPod
              `fan/remote/`,
              `fan/util/`,
              ]
+  pyDirs  = [`py/`]
   }
 }
 

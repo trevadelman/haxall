@@ -31,6 +31,7 @@ class Build : BuildPod
                "concurrent @{fan.depend}",
                "util @{fan.depend}"]
     srcDirs  = [`fan/`]
+    pyDirs   = [`py/`]
   }
 }
 

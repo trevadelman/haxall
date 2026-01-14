@@ -36,6 +36,7 @@ class Build : BuildPod
                "web @{fan.depend}"]
     srcDirs = [`fan/`]
     jsDirs  = [`js/`]
+    pyDirs  = [`py/`]
     resDirs = [`res/`, `locale/`]
   }
 
