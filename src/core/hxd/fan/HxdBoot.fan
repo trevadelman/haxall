@@ -65,7 +65,10 @@ class HxdBoot : HxBoot
       it.dir  = this.dbDir
       it.pool = ActorPool { it.name = "Hxd-Folio" }
     }
-    return HxFolio.open(config)
+    // PYTHON-FANTOM: Temporarily use FolioFlatFile instead of HxFolio
+    // to avoid hxStore Java dependency. See readme.md for details.
+    // Original: return HxFolio.open(config)
+    return FolioFlatFile.open(config)
   }
 
   override SysInfo initSysInfo()
@@ -181,4 +184,3 @@ internal class RunCli : HxCli
     return boot.run
   }
 }
-
