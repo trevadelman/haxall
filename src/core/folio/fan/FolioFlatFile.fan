@@ -128,7 +128,11 @@ const class FolioFlatFile : Folio
     skipTrash := opts.missing("trash")
 
     map := this.map
-    cx := PatherContext(|Ref id->Dict?| { map.get(id) })
+    hooks := this.hooks
+    // PYTHON-FANTOM: Pass hooks.ns to PatherContext to enable spec-type filter resolution.
+    // Without this, filters like readAll(Equip) would return empty results because
+    // PatherContext.xetoIsSpec needs namespace access to resolve spec inheritance.
+    cx := PatherContext(|Ref id->Dict?| { map.get(id) }, |Bool checked->Namespace?| { hooks.ns(checked) })
 
     count := 0
     return eachWhile |rec|
