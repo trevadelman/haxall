@@ -1,6 +1,11 @@
 # Hand-written haystack module for Python
 # Contains native implementations that mirror the ES/JavaScript versions
 
+# Import fan.sys FIRST to trigger import caching optimization.
+# The sys pod's __init__.py installs a cached __import__ that reduces
+# xeto namespace creation from ~25s to ~6s.
+import fan.sys
+
 #################################################################
 # Number patches
 #################################################################
