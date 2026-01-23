@@ -89,6 +89,39 @@ ref_full = fantom_ref.to_py(with_dis=True)         # -> {'id': ..., 'dis': ...}
 grid_rows = fantom_grid.to_py(deep=True)           # -> list of dicts
 ```
 
+### Pythonic Grid Operations
+
+Grids support Python protocols for natural iteration and length:
+
+```python
+# Iterate over rows (instead of index-based loops)
+for row in grid:
+    print(row.get("dis"))
+
+# Get length (instead of grid.size())
+print(f"Grid has {len(grid)} rows")
+
+# Access rows by index
+first_row = grid[0]
+last_row = grid[-1]
+```
+
+### Pythonic Row Access
+
+Rows support Python dict-like access with defaults:
+
+```python
+# Get with default (instead of: row.get("dis") if row.has("dis") else "Unknown")
+dis = row.get("dis", "Unknown")
+
+# Dict-style access (raises KeyError if missing)
+id = row["id"]
+
+# Iterate over tag names
+for key in row:
+    print(f"{key}: {row[key]}")
+```
+
 ### Converting Grids to DataFrames
 
 Grids support direct conversion to pandas and polars DataFrames:
@@ -164,6 +197,152 @@ num = Number(72.5, 'fahrenheit')  # Calls from_py internally
 ref = Ref('site-1', 'Building')
 coord = Coord(37.7749, -122.4194)
 ```
+
+---
+
+## Haystack Client
+
+Connect to Haystack servers (SkySpark, Haxall, etc.) using the Client class.
+
+### Basic Connection
+
+```python
+from fan.haystack.Client import Client
+from fan.sys.Uri import Uri
+
+# Connect with context manager (recommended - auto-closes)
+uri = Uri.from_str("http://localhost:8080/api/demo/")
+with Client.open_(uri, "username", "password") as client:
+    # Query server metadata
+    about = client.about()
+    print(f"Server: {about.get('productName')}")
+
+    # Read records
+    sites = client.read_all("site")
+    for row in sites:
+        print(row.get("dis", "Unknown"))
+```
+
+### Read Operations
+
+```python
+# Read all records matching filter
+sites = client.read_all("site")
+equips = client.read_all("equip and siteRef==@my-site")
+points = client.read_all("point and his")
+
+# Read single record (returns None if not found when checked=False)
+point = client.read("point and temp and sensor", checked=False)
+
+# Complex filters
+results = client.read_all("point and his and equipRef->siteRef->geoCity == \"Richmond\"")
+```
+
+### History Reads
+
+```python
+from fan.haystack.Etc import Etc
+from fan.sys.List import List
+from fan.sys.Duration import Duration
+
+# Find a point with history
+point = client.read("point and his", False)
+point_id = point.get("id")
+
+# Calculate date range
+his_end = point.get("hisEnd")
+end_date = his_end.date()
+start_date = end_date.minus(Duration.make(7 * 24 * 60 * 60 * 1_000_000_000))
+
+# Build hisRead request
+req = Etc.make_lists_grid(
+    None,  # meta
+    List.from_list(["id", "range"]),
+    None,  # column meta
+    List.from_list([List.from_list([point_id, f"{start_date},{end_date}"])])
+)
+
+# Call hisRead op
+history = client.call("hisRead", req)
+print(f"Retrieved {len(history)} samples")
+
+# Convert to pandas for analysis
+df = history.to_pandas()
+```
+
+### Axon Eval
+
+```python
+# Execute Axon expressions on the server
+result = client.eval("now()")
+result = client.eval("readAll(site).sort(\"dis\")")
+result = client.eval("readAll(point and his).size")
+```
+
+---
+
+## Xeto Validation
+
+### Basic Validation
+
+```python
+from fan.xeto.XetoEnv import XetoEnv
+from fan.sys.List import List
+
+# Get environment and create namespace
+env = XetoEnv.cur()
+lib_names = List.from_literal(['sys', 'ph'], 'sys::Str')
+ns = env.create_namespace_from_names(lib_names)
+
+# Validate a dict against a spec
+site_spec = ns.spec("ph::Site")
+is_valid = ns.fits(my_dict, site_spec)
+```
+
+### Validating Server Data
+
+When validating data from a Haystack server, refs point to records on the server
+that can't be resolved locally. Use `ignoreRefs` to skip ref validation:
+
+```python
+from fan.haystack.Etc import Etc
+from fan.xeto.Marker import Marker
+from fan.sys.Func import Func
+from fan.sys.Unsafe import Unsafe
+
+# Convert GbRow (server row) to proper Dict for validation
+site_dict = Etc.make_dict(Etc.dict_to_map(row))
+
+# Collect validation error messages
+explain_msgs = []
+def explain_callback(log_rec):
+    msg = str(log_rec.msg()) if hasattr(log_rec, 'msg') else str(log_rec)
+    explain_msgs.append(msg)
+
+# Create explain function (wrapping Python callable for Fantom)
+explain_func = Func.make_closure(
+    {"returns": "sys::Void", "immutable": "never",
+     "params": [{"name": "x", "type": "xeto::XetoLogRec"}]},
+    explain_callback
+)
+
+# Options: ignoreRefs skips ref resolution, explain captures error details
+opts = Etc.dict2(
+    "explain", Unsafe.make(explain_func),
+    "ignoreRefs", Marker.val()
+)
+
+# Validate
+if ns.fits(site_dict, site_spec, opts):
+    print("Valid!")
+else:
+    for msg in explain_msgs:
+        print(f"  - {msg}")
+```
+
+**Why ignoreRefs?** Server data contains refs like `weatherStationRef` that point
+to other records on the server. Without `ignoreRefs`, validation fails with
+"Unresolved ref" errors because those records aren't available locally.
 
 ---
 

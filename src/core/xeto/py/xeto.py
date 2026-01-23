@@ -327,12 +327,14 @@ class Namespace:
         except Exception:
             return None
 
-    def fits(self, val, spec) -> bool:
+    def fits(self, val, spec, ignore_refs: bool = False) -> bool:
         """Check if a value fits a spec.
 
         Args:
             val: Value to check (dict, Haystack type, etc.)
             spec: Spec name string or Spec object
+            ignore_refs: If True, skip ref resolution (useful for server data
+                         where refs point to records we can't resolve locally)
 
         Returns:
             True if val fits spec
@@ -340,16 +342,30 @@ class Namespace:
         Example:
             >>> ns.fits({"site": Marker(), "dis": "Building"}, 'ph::Site')
             True
+            >>> ns.fits(server_row, 'ph::Site', ignore_refs=True)
+            True
         """
+        from fan.haystack.Etc import Etc
+        from fan.xeto.Marker import Marker as XetoMarker
+
         # Convert dict to haystack Dict if needed
         if isinstance(val, dict):
             val = to_dict(val)
+        else:
+            # Convert GbRow or other Row types to proper Dict
+            if hasattr(val, 'each') and not hasattr(val, 'qname'):
+                val = Etc.make_dict(Etc.dict_to_map(val))
 
         # Convert spec string to Spec object if needed
         if isinstance(spec, str):
             spec = self.spec(spec)
             if spec is None:
                 return False
+
+        # Build options if needed
+        if ignore_refs:
+            opts = Etc.dict1("ignoreRefs", XetoMarker.val())
+            return self._ns.fits(val, spec, opts)
 
         return self._ns.fits(val, spec)
 
