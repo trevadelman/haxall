@@ -1,30 +1,12 @@
-# Xeto Python wrapper - re-export from xeto.py
-from .xeto import (
-    Ref,
-    Number,
-    Coord,
-    Marker,
-    NA,
-    Remove,
-    to_dict,
-    to_grid,
-    Namespace,
-    parse_filter,
-    parse_zinc,
-    to_zinc,
-)
+# Hand-written xeto module for Python
+# Contains native implementations that mirror the ES/JavaScript versions
 
-__all__ = [
-    'Ref',
-    'Number',
-    'Coord',
-    'Marker',
-    'NA',
-    'Remove',
-    'to_dict',
-    'to_grid',
-    'Namespace',
-    'parse_filter',
-    'parse_zinc',
-    'to_zinc',
-]
+#################################################################
+# Pythonic wrapper classes (Namespace, Ref, Number, etc.)
+# ARCHIVED: 2026-01-23
+# These wrappers have been moved to archive/pythonic-wrappers/
+# per Rick and Brian's direction to focus on the transpiled API
+# without additional wrapper layers.
+#
+# See archive/pythonic-wrappers/xeto.py to restore.
+#################################################################
