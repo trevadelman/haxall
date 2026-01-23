@@ -89,6 +89,61 @@ ref_full = fantom_ref.to_py(with_dis=True)         # -> {'id': ..., 'dis': ...}
 grid_rows = fantom_grid.to_py(deep=True)           # -> list of dicts
 ```
 
+### Converting Grids to DataFrames
+
+Grids support direct conversion to pandas and polars DataFrames:
+
+```python
+# Convert to pandas DataFrame
+df = grid.to_pandas()
+
+# Convert to polars DataFrame
+df = grid.to_polars()
+```
+
+**Requirements:** Install pandas and/or polars as needed:
+```bash
+pip install pandas
+pip install polars
+```
+
+**Example:**
+```python
+from xeto import Namespace, Ref, Marker, Number, to_grid
+
+# Build a grid
+grid = to_grid([
+    {'id': Ref('site-1'), 'dis': 'Building 1', 'area': Number(10000)},
+    {'id': Ref('site-2'), 'dis': 'Building 2', 'area': Number(25000)},
+])
+
+# Convert to pandas
+df = grid.to_pandas()
+print(df)
+#        id         dis     area
+# 0  site-1  Building 1  10000.0
+# 1  site-2  Building 2  25000.0
+
+# Convert to polars
+df = grid.to_polars()
+print(df)
+# shape: (2, 3)
+# ┌────────┬────────────┬─────────┐
+# │ id     ┆ dis        ┆ area    │
+# │ str    ┆ str        ┆ f64     │
+# ╞════════╪════════════╪═════════╡
+# │ site-1 ┆ Building 1 ┆ 10000.0 │
+# │ site-2 ┆ Building 2 ┆ 25000.0 │
+# └────────┴────────────┴─────────┘
+```
+
+**Type Conversion:** Both methods use `to_py(deep=True)` internally, so:
+- `Ref` -> string (id)
+- `Number` -> float
+- `Marker` -> True
+- `Coord` -> tuple (lat, lng)
+- `NA` -> None
+
 ### Creating Fantom Types from Python
 
 Use `from_py()` class methods:
