@@ -213,7 +213,47 @@ def _patch_grid():
             result.append(row_dict)
         return result
 
+    def grid_to_pandas(self):
+        """Convert Grid to pandas DataFrame.
+
+        Requires pandas to be installed: pip install pandas
+
+        Returns:
+            pandas.DataFrame with column names from the Grid
+
+        Example:
+            >>> df = grid.to_pandas()
+            >>> df.head()
+        """
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ImportError("pandas is required: pip install pandas")
+
+        return pd.DataFrame(self.to_py(deep=True))
+
+    def grid_to_polars(self):
+        """Convert Grid to polars DataFrame.
+
+        Requires polars to be installed: pip install polars
+
+        Returns:
+            polars.DataFrame with column names from the Grid
+
+        Example:
+            >>> df = grid.to_polars()
+            >>> df.head()
+        """
+        try:
+            import polars as pl
+        except ImportError:
+            raise ImportError("polars is required: pip install polars")
+
+        return pl.DataFrame(self.to_py(deep=True))
+
     Grid.to_py = grid_to_py
+    Grid.to_pandas = grid_to_pandas
+    Grid.to_polars = grid_to_polars
 
 try:
     _patch_grid()
