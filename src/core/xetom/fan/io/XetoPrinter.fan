@@ -29,8 +29,9 @@ class XetoPrinter
     this.ns   = ns
     this.out  = out
     this.opts = opts
-    this.noInferMeta = opts.has("noInferMeta")
-    this.qnameForce  = opts.has("qnameForce")
+    this.noInferMeta  = opts.has("noInferMeta")
+    this.qnameForce   = opts.has("qnameForce")
+    this.noDocComment = opts.has("noDocComment")
   }
 
 //////////////////////////////////////////////////////////////////////////
@@ -323,6 +324,10 @@ class XetoPrinter
 
     if (doc != null) w("/*").nl.w(doc).nl.w("*/").nl
 
+    // first check if any param/returns has meta, in which
+    // case we format parameters with newline
+    hasMeta := slots.any |s| { axonParam(s->name, s, true) }
+
     wc('(')
     Dict? returns
     first := true
@@ -335,17 +340,20 @@ class XetoPrinter
       }
       else
       {
-        if (first) first = false; else wc(',').sp
+        if (first) first = false
+        else wc(',').sp
+        if (hasMeta) nl.w("  ")
         axonParam(name, slot)
       }
     }
+    if (hasMeta) nl
     wc(')')
     if (returns != null) axonParam("returns", returns)
-    w(" => ")
+    w(" => ").nl
     w(axon)
   }
 
-  private Void axonParam(Str name, Dict meta)
+  private Bool axonParam(Str name, Dict meta, Bool checkHasMeta := false)
   {
     isReturn := name == "returns"
     type := "sys::Obj"
@@ -363,13 +371,18 @@ class XetoPrinter
       metaNames.add(n)
     }
 
+    // the checkHasMeta flag is used to just to reuse the
+    // meta logic to see if we need a <> section
+    hasMeta := !metaNames.isEmpty
+    if (checkHasMeta) return hasMeta
+
     // name
     if (!isReturn) w(name)
 
     // if everything else is defaults, we are done
     needType := !metaNames.isEmpty || type != "sys::Obj" || !maybe
     if (!needType && def == null)
-      return
+      return hasMeta
 
     // colon type <meta> def
     wc(':').sp
@@ -400,6 +413,7 @@ class XetoPrinter
       if (needType) sp
       w(def)
     }
+    return hasMeta
   }
 
 //////////////////////////////////////////////////////////////////////////
@@ -524,6 +538,7 @@ class XetoPrinter
   {
     str = str?.trimToNull
     if (str == null) return this
+    if (noDocComment) return this
     str.eachLine |line|
     {
       w("//")
@@ -658,6 +673,9 @@ class XetoPrinter
 
   ** Don't try to infer meta from ns
   Bool noInferMeta
+
+  ** Don't output doc comment
+  Bool noDocComment
 
 //////////////////////////////////////////////////////////////////////////
 // Fields

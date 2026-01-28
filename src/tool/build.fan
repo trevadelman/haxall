@@ -19,7 +19,7 @@ class Build : BuildGroup
       `hxTools/build.fan`,
       `xetodoc/build.fan`,
       `xetoTools/build.fan`,
-      `convert4/build.fan`,
+      // `convert4/build.fan`,  // Disabled - uses deprecated fandoc::FandocParser API
       `axonsh/build.fan`,
     ]
   }

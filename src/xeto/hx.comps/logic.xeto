@@ -1,0 +1,70 @@
+//
+// Copyright (c) 2024, SkyFoundry LLC
+// Licensed under the Academic Free License version 3.0
+//
+// History:
+//   16 Sep 2024  Matthew Giannini  Creation
+//
+
+// The base spec for all logic components
+Logic: HxComp <abstract> {
+  // The computed value
+  out: StatusBool? <summary, transient, readonly>
+}
+
+// Computes the logical negation of its input
+Not: Logic {
+  in: StatusBool? <summary>
+}
+
+// The base spec for all logic components that operate on up to four inputs
+QuadLogic: Logic <abstract> {
+  // Input A
+  inA: StatusBool? <summary>
+
+  // Input B
+  inB: StatusBool? <summary>
+
+  // Input C
+  inC: StatusBool?
+
+  // Input D
+  inD: StatusBool?
+}
+
+// Computes the logical "and" of its inputs
+And: QuadLogic
+
+// Computes the logical "or" of its inputs
+Or: QuadLogic
+
+// Computes the exclusive-or of its inputs
+Xor: QuadLogic
+
+// The base spec for all mathematical comparison operators
+Comparison: Logic <abstract> {
+  // Input A
+  inA: StatusNumber? <summary>
+
+  // Input B
+  inB: StatusNumber? <summary>
+}
+
+// Computes A > B
+GreaterThan: Comparison
+
+// Computes A >= B
+GreaterThanEqual: Comparison
+
+// Computes A < B
+LessThan: Comparison
+
+// Computes A <= B
+LessThanEqual: Comparison
+
+// Computes A == B
+Equal: Comparison
+
+// Computes A != B
+NotEqual: Comparison
+

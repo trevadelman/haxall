@@ -65,15 +65,13 @@ class AFunc
 
     doc := def["doc"] as Str ?: ""
     src := def["src"] as Str ?: throw Err("Missing axon src")
-    axon := ast.config.ns.io.readAxon(src)->axon
 
-    fn := Parser(Loc.eval, src.in).parseTopWithParams(name)
-    params := fn.params.map |x->AParam| { AParam(x.name, AType.obj, x.def?.toStr) }
-    returns := AParam("returns", AType.obj, null)
+    sig := AxonConvertParser(src).parseSig
+    returns := AParam("returns", AType.obj)
 
     meta := Etc.dictFromMap(mapMeta(ast, def))
 
-    func := make(name, doc, meta, params, returns, axon)
+    func := make(name, doc, meta, sig.aparams, returns, sig.body)
     ext.funcs.add(func)
   }
 
@@ -126,7 +124,7 @@ class AFunc
     // returns
     returnType := method.returns
     if (returnType.name == "Void") returnType = Obj?#
-    returns := AParam("returns", AType.map(returnType), null)
+    returns := AParam("returns", AType.map(returnType))
 
     // function stub
     return AFunc(name, doc, Etc.makeDict(meta), params, returns, null)
@@ -150,6 +148,7 @@ class AFunc
     {
       // skip these
       if (n == "id")  return
+      if (n == "mod") return
       if (n == "def")  return
       if (n == "lib")  return
       if (n == "is")   return
@@ -238,9 +237,7 @@ class AFunc
       else echo("WARN: unhandled lazy param: $method $name")
     }
 
-    def := null // TODO
-
-    return AParam(name, AType.map(type), def)
+    return AParam(name, AType.map(type), Etc.dict0)
   }
 
 //////////////////////////////////////////////////////////////////////////
@@ -249,12 +246,12 @@ class AFunc
 
   new make(Str name, Str doc, Dict meta, AParam[] params, AParam returns, Str? axon)
   {
-    this.name    = name
-    this.doc     = doc
-    this.meta    = meta
-    this.params  = params
-    this.returns = returns
-    this.axon    = axon
+    this.name     = name
+    this.doc      = doc
+    this.meta     = meta
+    this.params   = params
+    this.returns  = returns
+    this.axonBody = axon
   }
 
   const Str name
@@ -262,7 +259,7 @@ class AFunc
   const Dict meta
   const AParam[] params
   const AParam returns
-  const Str? axon
+  const Str? axonBody
 
   Void eachSlot(|AParam, Bool needComma| f)
   {
@@ -289,16 +286,23 @@ class AFunc
 
 const class AParam
 {
-  new make(Str name, AType type, Str? def)
+  new make(Str name, AType type, Dict meta := Etc.dict0)
   {
     this.name = name
     this.type = type
-    this.def  = def
+    this.meta = meta
+  }
+
+  new makeFnParam(FnParam p)
+  {
+    this.name = p.name
+    this.type = AType.obj
+    this.meta = p.def == null ? Etc.dict0 : Etc.dict1("axon", p.def.toStr)
   }
 
   const Str name
   const AType type
-  const Str? def
+  const Dict meta
 
   override Str toStr() { "$name: $type" }
 }

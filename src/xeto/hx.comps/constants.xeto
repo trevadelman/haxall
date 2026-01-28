@@ -1,0 +1,25 @@
+//
+// Copyright (c) 2025, SkyFoundry LLC
+// Licensed under the Academic Free License version 3.0
+//
+// History:
+//   23 Jun 2025  Matthew Giannini  Creation
+//
+
+Const: HxComp <abstract>
+
+// Boolean constant
+BoolConst: Const {
+  out: StatusBool? <summary>
+}
+
+// Number constant
+NumberConst: Const {
+  out: StatusNumber? <summary>
+}
+
+// Str constant
+StrConst: Const {
+  out: StatusStr? <summary>
+}
+

@@ -41,7 +41,6 @@ class XetoAxonReader
   {
     // skip leading whitespace
     leading := true
-    slashStar := 0
     for (i := 0; i<lines.size; ++i)
     {
       line := lines[i].trim
@@ -66,16 +65,18 @@ class XetoAxonReader
         return
       }
 
-      // end of /* .... */
-      if (line.contains("*/") && (slashStar == 1 || line.startsWith("/*")))
+      // start of /* */
+      if (line.startsWith("/*"))
       {
-        this.doc = lines[0..i].join("\n").trim[2..-3].trim
+        s := i
+        e := i
+        for (; e<lines.size; ++e) if (lines[e].contains("*/")) break
+        this.doc = lines[s..e].join("\n").trim[2..-3].trim
         return
       }
 
-      // start of /* */
-      if (line.startsWith("/*")) { slashStar++; continue }
-
+      // something else (most likely start of parameters with no comment)
+      return
     }
   }
 
@@ -285,7 +286,7 @@ class XetoAxonReader
     s := StrBuf()
     s.add(curLine)
     lines.eachRange(linei+1..-1) |line| { s.add("\n").add(line) }
-    body = s.toStr.trimEnd
+    body = s.toStr.trim
   }
 
 //////////////////////////////////////////////////////////////////////////

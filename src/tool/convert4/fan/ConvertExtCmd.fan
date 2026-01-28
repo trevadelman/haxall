@@ -102,6 +102,7 @@ internal class ConvertExtCmd : ConvertCmd
     if (!ext.funcs.isEmpty)  addDepend(s, "axon", "hx")
     if (ext.libName != "hx") addDepend(s, "hx")
     if (ext.dependOnIon) addDepend(s, "ion")
+    if (ext.dependOnRule) addDepend(s, "hx.rule", "skyspark")
     s.add("  }")
     return s.toStr
   }
@@ -115,6 +116,7 @@ internal class ConvertExtCmd : ConvertCmd
     s.add(" versions: $versions")
     s.add(" }\n")
   }
+
 
 //////////////////////////////////////////////////////////////////////////
 // Gen Funcs
@@ -150,13 +152,17 @@ internal class ConvertExtCmd : ConvertCmd
       if (comma) s.add(", ")
       genParam(s, p)
     }
-    if (f.axon != null)
+    if (f.axonBody != null)
     {
       heredoc := "---"
-      while (f.axon.contains(heredoc)) heredoc += "-"
+      while (f.axonBody.contains(heredoc)) heredoc += "-"
       s.add("\n")
       s.add("    <axon:").add(heredoc).add("\n")
-      f.axon.splitLines.each |line| { s.add("    ").add(line).add("\n") }
+      f.axonBody.splitLines.each |line|
+      {
+        if (!line.trim.isEmpty) s.add("    ").add(line)
+        s.add("\n")
+      }
       s.add("    ").add(heredoc).add(">\n").add("  }\n")
     }
     else
@@ -200,10 +206,15 @@ internal class ConvertExtCmd : ConvertCmd
     }
   }
 
-  Void genParam(StrBuf s, AParam p)
+  Void genParam(StrBuf buf, AParam p)
   {
-    s.add(p.name).add(": ").add(p.type.sig)
-    if (p.def != null) s.add(" <axon:").add(p.def.toCode).add(">")
+    buf.add(p.name).add(": ").add(p.type.sig)
+    if (!p.meta.isEmpty)
+    {
+      buf.add(" <")
+      encodeDictPairs(buf, p.meta)
+      buf.add(">")
+    }
   }
 
   Void genDoc(StrBuf s, Str? doc, Str indent)

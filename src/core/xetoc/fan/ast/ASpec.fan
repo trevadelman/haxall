@@ -136,6 +136,13 @@ internal final const class ASpec : ANode, CNode, Spec, SpecBindingInfo
     return ast.meta
   }
 
+  ** Add mixin marker
+  Void metaAddMixin()
+  {
+    ast.flavor = SpecFlavor.mixIn
+    metaInit.map.add("mixin", sys.markerScalar(loc))
+  }
+
   ** Return if meta has the given tag
   Bool metaHas(Str name)
   {
@@ -299,6 +306,7 @@ internal final const class ASpec : ANode, CNode, Spec, SpecBindingInfo
   override Bool isInterface() { hasFlag(MSpecFlags.interface) }
   override Bool isComp()      { hasFlag(MSpecFlags.comp) }
   override Bool isTransient() { hasFlag(MSpecFlags.transient) }
+  override Bool isHaystack()  { hasFlag(MSpecFlags.haystack) }
 
   /*
   override Bool isNone()   { hasFlag(MSpecFlags.none) }

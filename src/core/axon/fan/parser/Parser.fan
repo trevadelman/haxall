@@ -81,7 +81,9 @@ class Parser
   protected Expr axonParam()
   {
     inAxonParam = true
-    return expr
+    res := expr
+    inAxonParam = false
+    return res
   }
 
   protected Expr namedExpr(Str name)
@@ -797,7 +799,7 @@ class Parser
   **
   ** Parse lambda parameters, the lead '(' must already be consumed
   **
-  private FnParam[] params()
+  protected FnParam[] params()
   {
     acc := FnParam[,]
     if (cur !== Token.rparen)
