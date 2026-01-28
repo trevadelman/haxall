@@ -49,3 +49,7 @@ npm/
 # env variables
 *.env
 
+# Local symlinks (for running from source)
+/bin/fanlaunch
+/etc/sys/
+
