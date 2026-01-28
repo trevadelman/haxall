@@ -42,13 +42,24 @@ const class HxRedis : Folio
     this.redisUri = redisUri
     this.passwords = PasswordStore.open(dir+`passwords.props`, config)
     this.actor = Actor(config.pool) |msg| { onReceive(msg) }
+    this.map = ConcurrentMap(1024)
+    this.idsMap = ConcurrentMap(1024)
 
-    // Initialize version from Redis
+    // Initialize from Redis: load all records into cache
     redis := RedisClient.open(redisUri)
     try
     {
       verStr := redis.get("meta:version")
       curVerRef.val = verStr?.toInt ?: 1
+
+      // Load all records into memory cache
+      allIds := redis.smembers("idx:all")
+      allIds.each |idStr|
+      {
+        id := internRef(Ref.fromStr(idStr))
+        rec := loadRecFromRedis(redis, id)
+        if (rec != null) map.set(id, rec)
+      }
     }
     finally redis.close
   }
@@ -63,8 +74,62 @@ const class HxRedis : Folio
   @NoDoc const override PasswordStore passwords
   private const Actor actor
 
+  ** In-memory cache of records (keyed by interned Ref)
+  internal const ConcurrentMap map
+
+  ** Map of Ref IDs to interned Refs (for object identity)
+  private const ConcurrentMap idsMap
+
   @NoDoc override Int curVer() { curVerRef.val }
   private const AtomicInt curVerRef := AtomicInt(1)
+
+  **
+  ** Intern a Ref to ensure object identity.
+  ** Same ID always returns the same Ref object.
+  **
+  override Ref internRef(Ref id)
+  {
+    if (id.isRel && idPrefix != null) id = id.toAbs(idPrefix)
+    intern := idsMap.get(id) as Ref
+    if (intern != null) return intern
+    idsMap.set(id, id)
+    return id
+  }
+
+  **
+  ** Load a record from Redis and normalize its Refs.
+  ** Used during initialization to populate the cache.
+  **
+  private Dict? loadRecFromRedis(RedisClient redis, Ref id)
+  {
+    key := "rec:${id}"
+    data := redis.hgetall(key)
+    if (data.isEmpty) return null
+
+    trioStr := data["trio"]
+    if (trioStr == null) return null
+
+    try
+    {
+      rawRec := TrioReader(trioStr.in).readDict
+      // Normalize all Refs in the record
+      tags := Str:Obj[:]
+      rawRec.each |v, n|
+      {
+        if (v is Ref)
+          tags[n] = internRef(v)
+        else
+          tags[n] = v
+      }
+      rec := Etc.makeDict(tags)
+      rec.id.disVal = rec.dis
+      return rec
+    }
+    catch (Err e)
+    {
+      return null
+    }
+  }
 
 //////////////////////////////////////////////////////////////////////////
 // Folio
@@ -85,43 +150,35 @@ const class HxRedis : Folio
 
   @NoDoc override FolioRec? doReadRecById(Ref id)
   {
-    redis := RedisClient.open(redisUri)
-    try
-    {
-      rec := readRecFromRedis(redis, id)
-      if (rec == null && id.isRel && idPrefix != null)
-        rec = readRecFromRedis(redis, id.toAbs(idPrefix))
-      if (rec != null && rec.missing("trash"))
-        return HxRedisRec(rec)
-      else
-        return null
-    }
-    finally redis.close
+    // Use in-memory cache for object identity
+    rec := map.get(internRef(id)) as Dict
+    if (rec == null && id.isRel && idPrefix != null)
+      rec = map.get(internRef(id.toAbs(idPrefix))) as Dict
+    if (rec != null && rec.missing("trash"))
+      return HxRedisRec(rec)
+    else
+      return null
   }
 
   @NoDoc override FolioFuture doReadByIds(Ref[] ids)
   {
-    redis := RedisClient.open(redisUri)
-    try
+    // Use in-memory cache for object identity
+    errMsg := ""
+    dicts := Dict?[,]
+    dicts.size = ids.size
+    ids.each |id, i|
     {
-      errMsg := ""
-      dicts := Dict?[,]
-      dicts.size = ids.size
-      ids.each |id, i|
-      {
-        rec := readRecFromRedis(redis, id)
-        if (rec == null && id.isRel && idPrefix != null)
-          rec = readRecFromRedis(redis, id.toAbs(idPrefix))
+      rec := map.get(internRef(id)) as Dict
+      if (rec == null && id.isRel && idPrefix != null)
+        rec = map.get(internRef(id.toAbs(idPrefix))) as Dict
 
-        if (rec != null && rec.missing("trash"))
-          dicts[i] = rec
-        else if (errMsg.isEmpty)
-          errMsg = id.toStr
-      }
-      errs := !errMsg.isEmpty
-      return FolioFuture.makeSync(ReadFolioRes(errMsg, errs, dicts))
+      if (rec != null && rec.missing("trash"))
+        dicts[i] = rec
+      else if (errMsg.isEmpty)
+        errMsg = id.toStr
     }
-    finally redis.close
+    errs := !errMsg.isEmpty
+    return FolioFuture.makeSync(ReadFolioRes(errMsg, errs, dicts))
   }
 
   @NoDoc override FolioFuture doReadAll(Filter filter, Dict? opts)
@@ -146,36 +203,25 @@ const class HxRedis : Folio
     limit := (opts["limit"] as Number)?.toInt ?: 10_000
     skipTrash := opts.missing("trash")
 
-    redis := RedisClient.open(redisUri)
-    try
+    hooks := this.hooks
+    // Create context for filter matching - use cache for lookups
+    cx := PatherContext(
+      |Ref id->Dict?| { map.get(internRef(id)) },
+      |Bool checked->Namespace?| { hooks.ns(checked) }
+    )
+
+    count := 0
+    return map.eachWhile |val|
     {
-      hooks := this.hooks
-      // Create context for filter matching
-      cx := PatherContext(
-        |Ref id->Dict?| { readRecFromRedis(redis, id) },
-        |Bool checked->Namespace?| { hooks.ns(checked) }
-      )
-
-      // Optimize: Use tag index for simple "has" filters
-      candidateIds := getCandidateIds(redis, filter)
-      count := 0
-
-      for (i := 0; i < candidateIds.size; i++)
-      {
-        idStr := candidateIds[i]
-        rec := readRecFromRedis(redis, Ref.fromStr(idStr))
-        if (rec == null) continue
-        if (!filter.matches(rec, cx)) continue
-        if (rec.has("trash") && skipTrash) continue
-
-        count++
-        x := f(rec)
-        if (x != null) return x
-        if (count >= limit) return "break"
-      }
-      return null
+      rec := val as Dict
+      if (rec == null) return null
+      if (!filter.matches(rec, cx)) return null
+      if (rec.has("trash") && skipTrash) return null
+      count++
+      x := f(rec)
+      if (x != null) return x
+      return count >= limit ? "break" : null
     }
-    finally redis.close
   }
 
   **
@@ -236,6 +282,63 @@ const class HxRedis : Folio
   @NoDoc override FolioBackup backup() { throw UnsupportedErr() }
 
   @NoDoc override FolioFile file() { throw UnsupportedErr() }
+
+  **
+  ** Override sync to handle disMacro synchronization.
+  ** When mgr == "dis", recalculate all disMacro display values.
+  **
+  @NoDoc override This sync(Duration? timeout := null, Str? mgr := null)
+  {
+    if (mgr == "dis") syncDis
+    return this
+  }
+
+  **
+  ** Recalculate display values for all records with disMacro.
+  **
+  private Void syncDis()
+  {
+    cache := Ref:Str[:]
+    map.each |val|
+    {
+      rec := val as Dict
+      if (rec == null) return
+      dis := toDis(cache, rec.id)
+      rec.id.disVal = dis
+    }
+  }
+
+  **
+  ** Compute display string for a Ref with cycle detection via cache.
+  ** Pattern from DisMgr: put default in cache BEFORE recursing.
+  **
+  internal Str toDis(Ref:Str cache, Ref id)
+  {
+    // Check cache first
+    x := cache[id]
+    if (x != null) return x
+
+    // Put default (id string) in cache BEFORE computing
+    // This prevents infinite cycles - if we hit this id again, we get the id string
+    cache[id] = id.id
+
+    // Now compute actual display
+    rec := map.get(id) as Dict
+    if (rec != null)
+    {
+      disMacro := rec["disMacro"] as Str
+      if (disMacro != null)
+        cache[id] = HxRedisMacro(disMacro, rec, this, cache).apply
+      else
+        cache[id] = rec.dis
+    }
+    // If record doesn't exist (deleted), disVal stays as id string
+
+    // Update the Ref's disVal so Dict.dis and Ref.dis work correctly
+    id.disVal = cache[id]
+
+    return cache[id]
+  }
 
 //////////////////////////////////////////////////////////////////////////
 // Redis Record I/O
@@ -391,13 +494,22 @@ const class HxRedis : Folio
       // Apply to compute new record Dict
       diffs = commits.map |c->Diff| { c.apply }
 
-      // Update Redis - pass oldRec for proper index management
+      // Update in-memory cache; only update Redis for non-transient
       diffs.each |diff, i|
       {
+        id := internRef(diff.id)
         if (diff.isRemove)
-          removeRecFromRedis(redis, diff.id)
+        {
+          map.remove(id)
+          if (!diff.isTransient)
+            removeRecFromRedis(redis, diff.id)
+        }
         else
-          writeRecToRedis(redis, diff.newRec, commits[i].oldRec)
+        {
+          map.set(id, diff.newRec)
+          if (!diff.isTransient)
+            writeRecToRedis(redis, diff.newRec, commits[i].oldRec)
+        }
       }
 
       // Post commit
@@ -456,10 +568,11 @@ internal class HxRedisCommit
   {
     this.folio  = folio
     this.redis  = redis
-    this.id     = normRef(diff.id)
+    this.id     = folio.internRef(diff.id)
     this.inDiff = diff
     this.newMod = newMod
-    this.oldRec = folio.readRecFromRedis(redis, this.id)
+    // Use cache for oldRec to maintain object identity
+    this.oldRec = folio.map.get(this.id) as Dict
     this.oldMod = inDiff.oldMod
     this.event  = HxRedisCommitEvent(diff, oldRec, cxInfo)
   }
@@ -520,8 +633,9 @@ internal class HxRedisCommit
 
   private Ref normRef(Ref id)
   {
-    if (id.isRel && folio.idPrefix != null) id = id.toAbs(folio.idPrefix)
-    rec := folio.readRecFromRedis(redis, id)
+    // Use interned Refs from cache for object identity
+    id = folio.internRef(id)
+    rec := folio.map.get(id) as Dict
     if (rec != null) return rec.id
     if (id.disVal != null) id = Ref(id.id, null)
     return id
@@ -544,4 +658,30 @@ internal class HxRedisCommitEvent : FolioCommitEvent
   override Diff diff
   override Dict? oldRec
   override Obj? cxInfo
+}
+
+**************************************************************************
+** HxRedisMacro
+**************************************************************************
+
+**
+** HxRedisMacro extends Macro to resolve Ref display values via toDis.
+** This is the same pattern as DisMgrMacro in hxFolio.
+**
+internal class HxRedisMacro : Macro
+{
+  new make(Str pattern, Dict scope, HxRedis folio, Ref:Str cache)
+    : super(pattern, scope)
+  {
+    this.folio = folio
+    this.cache = cache
+  }
+
+  HxRedis folio
+  Ref:Str cache
+
+  override Str refToDis(Ref ref)
+  {
+    folio.toDis(cache, folio.internRef(ref))
+  }
 }

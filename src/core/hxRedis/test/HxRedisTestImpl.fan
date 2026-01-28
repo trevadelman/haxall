@@ -20,12 +20,23 @@ class HxRedisTestImpl : FolioTestImpl
 {
   override Str name() { "hxRedis" }
 
+  ** Track if this is first open for this test
+  private Bool needsFlush := true
+
   override Folio open(FolioConfig config)
   {
-    // Flush Redis test database before each test
-    redis := RedisClient.open(`redis://localhost:6379/15`)
-    redis.flushdb
-    redis.close
+    // Flush only on first open per test, not on reopens
+    if (needsFlush)
+    {
+      try
+      {
+        redis := RedisClient.open(`redis://localhost:6379/15`)
+        redis.flushdb
+        redis.close
+      }
+      catch (Err e) {}
+      needsFlush = false
+    }
 
     // Build opts with Redis URI pointing to test database
     optsMap := Str:Obj[:]
@@ -48,6 +59,8 @@ class HxRedisTestImpl : FolioTestImpl
 
   override Void teardown()
   {
+    // Reset flush flag for next test
+    needsFlush = true
     // Flush Redis test database after tests
     try
     {
@@ -61,4 +74,5 @@ class HxRedisTestImpl : FolioTestImpl
   override Bool supportsTransient() { true }
   override Bool supportsHis() { false }
   override Bool supportsFolioX() { false }
+  override Bool supportsIdPrefixRename() { false }
 }
