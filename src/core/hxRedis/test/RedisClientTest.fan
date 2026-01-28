@@ -191,6 +191,236 @@ class RedisClientTest : Test
   }
 
 //////////////////////////////////////////////////////////////////////////
+// Transactions
+//////////////////////////////////////////////////////////////////////////
+
+  Void testMultiExec()
+  {
+    r = RedisClient.open
+
+    // Basic transaction
+    r.multi
+    r.set("test:tx1", "value1")
+    r.set("test:tx2", "value2")
+    r.incr("test:counter")
+    results := r.exec
+
+    // Verify results array contains response for each command
+    verifyNotNull(results)
+    verifyEq(results.size, 3)
+    verifyEq(results[0], "OK")  // SET returns OK
+    verifyEq(results[1], "OK")
+    verifyEq(results[2], 1)     // INCR returns new value
+
+    // Verify values were set
+    verifyEq(r.get("test:tx1"), "value1")
+    verifyEq(r.get("test:tx2"), "value2")
+    verifyEq(r.get("test:counter"), "1")
+
+    // Cleanup
+    r.del(["test:tx1", "test:tx2", "test:counter"])
+    r.close
+  }
+
+  Void testDiscard()
+  {
+    r = RedisClient.open
+
+    // Set initial value
+    r.set("test:discard", "original")
+
+    // Start transaction but discard
+    r.multi
+    r.set("test:discard", "changed")
+    r.discard
+
+    // Verify original value unchanged
+    verifyEq(r.get("test:discard"), "original")
+
+    // Cleanup
+    r.del(["test:discard"])
+    r.close
+  }
+
+  Void testWatchAbort()
+  {
+    r = RedisClient.open
+
+    // Set initial value
+    r.set("test:watch", "initial")
+
+    // Watch the key
+    r.watch(["test:watch"])
+
+    // Modify the key (simulates another client)
+    r2 := RedisClient.open
+    r2.set("test:watch", "modified")
+    r2.close
+
+    // Try to execute transaction - should abort
+    r.multi
+    r.set("test:watch", "transaction")
+    results := r.exec
+
+    // exec returns null when WATCH caused abort
+    verifyNull(results)
+
+    // Verify the value is from the "other client"
+    verifyEq(r.get("test:watch"), "modified")
+
+    // Cleanup
+    r.del(["test:watch"])
+    r.close
+  }
+
+  Void testUnwatch()
+  {
+    r = RedisClient.open
+
+    // Set initial value
+    r.set("test:unwatch", "initial")
+
+    // Watch and then unwatch
+    r.watch(["test:unwatch"])
+    r.unwatch
+
+    // Modify the key
+    r2 := RedisClient.open
+    r2.set("test:unwatch", "modified")
+    r2.close
+
+    // Transaction should succeed because we unwatched
+    r.multi
+    r.set("test:unwatch", "transaction")
+    results := r.exec
+
+    verifyNotNull(results)
+    verifyEq(r.get("test:unwatch"), "transaction")
+
+    // Cleanup
+    r.del(["test:unwatch"])
+    r.close
+  }
+
+//////////////////////////////////////////////////////////////////////////
+// Pipeline
+//////////////////////////////////////////////////////////////////////////
+
+  Void testBasicPipeline()
+  {
+    r = RedisClient.open
+
+    // Pipeline multiple SET/GET commands
+    results := r.pipeline
+    {
+      it.set("test:pipe:a", "value-a")
+      it.set("test:pipe:b", "value-b")
+      it.set("test:pipe:c", "value-c")
+      it.get("test:pipe:a")
+      it.get("test:pipe:b")
+      it.get("test:pipe:c")
+    }
+
+    // Verify results array matches command order
+    verifyEq(results.size, 6)
+    verifyEq(results[0], "OK")  // SET response
+    verifyEq(results[1], "OK")
+    verifyEq(results[2], "OK")
+    verifyEq(results[3], "value-a")  // GET response
+    verifyEq(results[4], "value-b")
+    verifyEq(results[5], "value-c")
+
+    // Cleanup
+    r.del(["test:pipe:a", "test:pipe:b", "test:pipe:c"])
+    r.close
+  }
+
+  Void testPipelineMixedCommands()
+  {
+    r = RedisClient.open
+
+    // Pipeline with different command types
+    results := r.pipeline
+    {
+      it.set("test:pipe:str", "hello")
+      it.hset("test:pipe:hash", "field", "value")
+      it.sadd("test:pipe:set", ["a", "b"])
+      it.incr("test:pipe:counter")
+      it.get("test:pipe:str")
+      it.hget("test:pipe:hash", "field")
+    }
+
+    verifyEq(results.size, 6)
+    verifyEq(results[0], "OK")      // SET
+    verifyEq(results[1], 1)         // HSET returns 1 for new field
+    verifyEq(results[2], 2)         // SADD returns count of new members
+    verifyEq(results[3], 1)         // INCR returns new value
+    verifyEq(results[4], "hello")   // GET
+    verifyEq(results[5], "value")   // HGET
+
+    // Cleanup
+    r.del(["test:pipe:str", "test:pipe:hash", "test:pipe:set", "test:pipe:counter"])
+    r.close
+  }
+
+  Void testLargePipeline()
+  {
+    r = RedisClient.open
+
+    // Pipeline 100 commands
+    results := r.pipeline |redis|
+    {
+      100.times |i|
+      {
+        redis.set("test:pipe:large:$i", "value-$i")
+      }
+    }
+
+    verifyEq(results.size, 100)
+    results.each |res| { verifyEq(res, "OK") }
+
+    // Verify data was written
+    verifyEq(r.get("test:pipe:large:0"), "value-0")
+    verifyEq(r.get("test:pipe:large:99"), "value-99")
+
+    // Cleanup with pipeline
+    r.pipeline |redis|
+    {
+      100.times |i|
+      {
+        redis.del(["test:pipe:large:$i"])
+      }
+    }
+
+    r.close
+  }
+
+  Void testPipelineAfterRegularCommands()
+  {
+    r = RedisClient.open
+
+    // Regular commands before pipeline
+    r.set("test:pipe:before", "before-value")
+
+    // Pipeline
+    results := r.pipeline
+    {
+      it.get("test:pipe:before")
+      it.set("test:pipe:during", "during-value")
+    }
+
+    verifyEq(results[0], "before-value")
+    verifyEq(results[1], "OK")
+
+    // Regular commands after pipeline
+    verifyEq(r.get("test:pipe:during"), "during-value")
+
+    // Cleanup
+    r.del(["test:pipe:before", "test:pipe:during"])
+    r.close
+  }
+
+//////////////////////////////////////////////////////////////////////////
 // Connection
 //////////////////////////////////////////////////////////////////////////
 

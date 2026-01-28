@@ -474,6 +474,204 @@ class RedisClientTortureTest : Test
   }
 
 //////////////////////////////////////////////////////////////////////////
+// Transaction Stress
+//////////////////////////////////////////////////////////////////////////
+
+  Void testLargeTransaction()
+  {
+    r = RedisClient.open
+
+    // Transaction with 100 commands
+    r.multi
+    100.times |i|
+    {
+      r.set("test:tx:large:$i", "value-$i")
+    }
+    results := r.exec
+
+    // Verify all 100 commands returned results
+    verifyNotNull(results)
+    verifyEq(results.size, 100)
+
+    // Verify all values were set
+    100.times |i|
+    {
+      verifyEq(r.get("test:tx:large:$i"), "value-$i")
+    }
+
+    // Cleanup
+    keys := Str[,]
+    100.times |i| { keys.add("test:tx:large:$i") }
+    r.del(keys)
+    r.close
+  }
+
+  Void testConcurrentWatchConflicts()
+  {
+    // Test multiple connections racing on WATCH
+    r = RedisClient.open
+    r.set("test:tx:race", "0")
+
+    conflicts := 0
+    successes := 0
+
+    // Simulate 10 "threads" trying to increment atomically
+    10.times |i|
+    {
+      client := RedisClient.open
+
+      // Watch the key
+      client.watch(["test:tx:race"])
+
+      // Read current value
+      current := client.get("test:tx:race")?.toInt ?: 0
+
+      // Simulate some other client modifying if this is an even iteration
+      if (i % 2 == 0)
+      {
+        r.set("test:tx:race", (current + 100).toStr)
+      }
+
+      // Try to set new value in transaction
+      client.multi
+      client.set("test:tx:race", (current + 1).toStr)
+      result := client.exec
+
+      if (result == null)
+        conflicts++
+      else
+        successes++
+
+      client.close
+    }
+
+    // We should have some conflicts and some successes
+    verify(conflicts > 0, "Expected some WATCH conflicts")
+    verify(successes > 0, "Expected some successful transactions")
+
+    // Cleanup
+    r.del(["test:tx:race"])
+    r.close
+  }
+
+  Void testTransactionErrorRecovery()
+  {
+    r = RedisClient.open
+
+    // Test: EXEC without MULTI should error
+    try
+    {
+      r.exec
+      fail("Expected error for EXEC without MULTI")
+    }
+    catch (RedisErr e)
+    {
+      verify(e.msg.contains("EXEC without MULTI"))
+    }
+
+    // Test: DISCARD without MULTI should error
+    try
+    {
+      r.discard
+      fail("Expected error for DISCARD without MULTI")
+    }
+    catch (RedisErr e)
+    {
+      verify(e.msg.contains("DISCARD without MULTI"))
+    }
+
+    // Verify client still works after errors
+    r.set("test:tx:recovery", "still works")
+    verifyEq(r.get("test:tx:recovery"), "still works")
+
+    // Cleanup
+    r.del(["test:tx:recovery"])
+    r.close
+  }
+
+  Void testRapidTransactionCycling()
+  {
+    r = RedisClient.open
+
+    // 50 rapid MULTI/EXEC cycles
+    50.times |i|
+    {
+      r.multi
+      r.set("test:tx:cycle:a", "iteration-$i")
+      r.set("test:tx:cycle:b", "iteration-$i")
+      r.incr("test:tx:cycle:counter")
+      results := r.exec
+
+      verifyNotNull(results)
+      verifyEq(results.size, 3)
+    }
+
+    // Verify final state
+    verifyEq(r.get("test:tx:cycle:a"), "iteration-49")
+    verifyEq(r.get("test:tx:cycle:b"), "iteration-49")
+    verifyEq(r.get("test:tx:cycle:counter"), "50")
+
+    // Cleanup
+    r.del(["test:tx:cycle:a", "test:tx:cycle:b", "test:tx:cycle:counter"])
+    r.close
+  }
+
+  Void testTransactionWithLargeValues()
+  {
+    r = RedisClient.open
+
+    // Transaction with 1MB values
+    largeValue := Buf.random(100 * 1024).toBase64  // ~133KB as base64
+
+    r.multi
+    r.set("test:tx:bigval:1", largeValue)
+    r.set("test:tx:bigval:2", largeValue)
+    r.set("test:tx:bigval:3", largeValue)
+    results := r.exec
+
+    verifyNotNull(results)
+    verifyEq(results.size, 3)
+
+    // Verify values
+    verifyEq(r.get("test:tx:bigval:1"), largeValue)
+    verifyEq(r.get("test:tx:bigval:2"), largeValue)
+    verifyEq(r.get("test:tx:bigval:3"), largeValue)
+
+    // Cleanup
+    r.del(["test:tx:bigval:1", "test:tx:bigval:2", "test:tx:bigval:3"])
+    r.close
+  }
+
+  Void testMixedOperationsInTransaction()
+  {
+    r = RedisClient.open
+
+    // Transaction with different command types
+    r.multi
+    r.set("test:tx:mixed:str", "string")
+    r.hset("test:tx:mixed:hash", "field", "value")
+    r.sadd("test:tx:mixed:set", ["a", "b", "c"])
+    r.zadd("test:tx:mixed:zset", 1.5f, "member")
+    r.incr("test:tx:mixed:counter")
+    results := r.exec
+
+    verifyNotNull(results)
+    verifyEq(results.size, 5)
+
+    // Verify all operations succeeded
+    verifyEq(r.get("test:tx:mixed:str"), "string")
+    verifyEq(r.hget("test:tx:mixed:hash", "field"), "value")
+    verify(r.sismember("test:tx:mixed:set", "b"))
+    verifyEq(r.zrangebyscore("test:tx:mixed:zset", 0f, 10f).size, 1)
+    verifyEq(r.get("test:tx:mixed:counter"), "1")
+
+    // Cleanup
+    r.del(["test:tx:mixed:str", "test:tx:mixed:hash", "test:tx:mixed:set",
+           "test:tx:mixed:zset", "test:tx:mixed:counter"])
+    r.close
+  }
+
+//////////////////////////////////////////////////////////////////////////
 // Cleanup Verification
 //////////////////////////////////////////////////////////////////////////
 

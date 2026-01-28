@@ -4,6 +4,7 @@
 //
 // History:
 //   27 Jan 2026  Trevor Adelman  Creation
+//   28 Jan 2026  Trevor Adelman  Add SocketConfig, logging, AUTH from URI
 //
 
 using inet
@@ -21,6 +22,12 @@ using inet
 **   val := redis.get("foo")
 **   redis.close
 **
+** URI formats supported:
+**   - redis://localhost:6379         (default host/port)
+**   - redis://host:6379/0            (with database number)
+**   - redis://:password@host:6379    (with authentication)
+**   - redis://:password@host:6379/2  (auth + database)
+**
 class RedisClient
 {
 
@@ -28,11 +35,26 @@ class RedisClient
 // Construction
 //////////////////////////////////////////////////////////////////////////
 
+  ** Logger for Redis client operations
+  private static const Log log := Log.get("hxRedis")
+
+  ** Default socket configuration with timeouts
+  ** Connect timeout: 5 seconds (fail fast if Redis unreachable)
+  ** Receive timeout: 30 seconds (allow for slow queries)
+  static const SocketConfig defaultConfig := SocketConfig {
+    it.connectTimeout = 5sec
+    it.receiveTimeout = 30sec
+  }
+
   **
   ** Open a connection to Redis server.
-  ** URI format: redis://host:port or redis://host:port/db
+  ** URI format: redis://[:password@]host:port[/db]
   **
-  static RedisClient open(Uri uri := `redis://localhost:6379`)
+  ** Examples:
+  **   `redis://localhost:6379`
+  **   `redis://:mypassword@localhost:6379/0`
+  **
+  static RedisClient open(Uri uri := `redis://localhost:6379`, SocketConfig config := defaultConfig)
   {
     host := uri.host ?: "localhost"
     port := uri.port ?: 6379
@@ -40,15 +62,65 @@ class RedisClient
     if (uri.path.size > 0)
       db = uri.path[0].toInt(10, false) ?: 0
 
-    client := make(host, port)
+    // Extract password from URI userInfo (format: :password or user:password)
+    password := extractPassword(uri)
+
+    log.debug("Connecting to Redis at $host:$port (db=$db, auth=${password != null})")
+
+    client := make(host, port, config)
+
+    // Authenticate if password provided
+    if (password != null)
+    {
+      try
+      {
+        client.auth(password)
+        log.debug("Redis authentication successful")
+      }
+      catch (Err e)
+      {
+        client.close
+        log.err("Redis authentication failed: $e.msg")
+        throw e
+      }
+    }
+
+    // Select database if non-default
     if (db != 0) client.select(db)
+
     return client
   }
 
-  private new make(Str host, Int port)
+  **
+  ** Extract password from URI userInfo.
+  ** Supports formats: :password or user:password
+  ** Returns null if no password in URI.
+  **
+  private static Str? extractPassword(Uri uri)
   {
-    this.socket = TcpSocket()
-    this.socket.connect(IpAddr(host), port)
+    userInfo := uri.userInfo
+    if (userInfo == null) return null
+
+    // Format is either ":password" or "user:password"
+    colonIdx := userInfo.index(":")
+    if (colonIdx == null) return null
+
+    password := userInfo[colonIdx + 1..-1]
+    return password.isEmpty ? null : password
+  }
+
+  private new make(Str host, Int port, SocketConfig config)
+  {
+    this.socket = TcpSocket(config)
+    try
+    {
+      this.socket.connect(IpAddr(host), port)
+    }
+    catch (Err e)
+    {
+      log.err("Failed to connect to Redis at $host:$port: $e.msg")
+      throw e
+    }
     this.out = socket.out
     this.in = socket.in
   }
@@ -92,59 +164,59 @@ class RedisClient
 // String Operations
 //////////////////////////////////////////////////////////////////////////
 
-  ** Get value by key, returns null if not found
+  ** Get value by key, returns null if not found (or if pipelining)
   Str? get(Str key)
   {
     sendCommand(["GET", key])
-    return readReply as Str
+    return maybeReadReply as Str
   }
 
   ** Set key to value
   Void set(Str key, Str val)
   {
     sendCommand(["SET", key, val])
-    readReply
+    maybeReadReply
   }
 
-  ** Delete one or more keys
+  ** Delete one or more keys (returns 0 if pipelining)
   Int del(Str[] keys)
   {
     cmd := ["DEL"]
     cmd.addAll(keys)
     sendCommand(cmd)
-    return readReply as Int ?: 0
+    return maybeReadReply as Int ?: 0
   }
 
-  ** Check if key exists
+  ** Check if key exists (returns false if pipelining)
   Bool exists(Str key)
   {
     sendCommand(["EXISTS", key])
-    return (readReply as Int ?: 0) > 0
+    return (maybeReadReply as Int ?: 0) > 0
   }
 
 //////////////////////////////////////////////////////////////////////////
 // Hash Operations
 //////////////////////////////////////////////////////////////////////////
 
-  ** Get field from hash
+  ** Get field from hash (returns null if pipelining)
   Str? hget(Str key, Str field)
   {
     sendCommand(["HGET", key, field])
-    return readReply as Str
+    return maybeReadReply as Str
   }
 
-  ** Set field in hash
-  Void hset(Str key, Str field, Str val)
+  ** Set field in hash (returns 0 if pipelining, 1 if new field, 0 if existing)
+  Int hset(Str key, Str field, Str val)
   {
     sendCommand(["HSET", key, field, val])
-    readReply
+    return maybeReadReply as Int ?: 0
   }
 
-  ** Get all fields and values from hash
+  ** Get all fields and values from hash (returns empty if pipelining)
   Str:Str hgetall(Str key)
   {
     sendCommand(["HGETALL", key])
-    arr := readReply as Obj[]
+    arr := maybeReadReply as Obj[]
     result := Str:Str[:]
     if (arr != null)
     {
@@ -160,11 +232,11 @@ class RedisClient
     return result
   }
 
-  ** Delete field from hash
+  ** Delete field from hash (returns 0 if pipelining)
   Int hdel(Str key, Str field)
   {
     sendCommand(["HDEL", key, field])
-    return readReply as Int ?: 0
+    return maybeReadReply as Int ?: 0
   }
 
   ** Set multiple fields in hash
@@ -173,53 +245,53 @@ class RedisClient
     cmd := ["HMSET", key]
     fields.each |v, k| { cmd.add(k); cmd.add(v) }
     sendCommand(cmd)
-    readReply
+    maybeReadReply
   }
 
 //////////////////////////////////////////////////////////////////////////
 // Set Operations
 //////////////////////////////////////////////////////////////////////////
 
-  ** Add members to set
+  ** Add members to set (returns 0 if pipelining)
   Int sadd(Str key, Str[] members)
   {
     cmd := ["SADD", key]
     cmd.addAll(members)
     sendCommand(cmd)
-    return readReply as Int ?: 0
+    return maybeReadReply as Int ?: 0
   }
 
-  ** Remove members from set
+  ** Remove members from set (returns 0 if pipelining)
   Int srem(Str key, Str[] members)
   {
     cmd := ["SREM", key]
     cmd.addAll(members)
     sendCommand(cmd)
-    return readReply as Int ?: 0
+    return maybeReadReply as Int ?: 0
   }
 
-  ** Get all members of set
+  ** Get all members of set (returns empty if pipelining)
   Str[] smembers(Str key)
   {
     sendCommand(["SMEMBERS", key])
-    arr := readReply as Obj[]
+    arr := maybeReadReply as Obj[]
     return arr?.map |v| { v as Str }?.exclude |v| { v == null } ?: Str[,]
   }
 
-  ** Check if member exists in set
+  ** Check if member exists in set (returns false if pipelining)
   Bool sismember(Str key, Str member)
   {
     sendCommand(["SISMEMBER", key, member])
-    return (readReply as Int ?: 0) > 0
+    return (maybeReadReply as Int ?: 0) > 0
   }
 
-  ** Get intersection of sets
+  ** Get intersection of sets (returns empty if pipelining)
   Str[] sinter(Str[] keys)
   {
     cmd := ["SINTER"]
     cmd.addAll(keys)
     sendCommand(cmd)
-    arr := readReply as Obj[]
+    arr := maybeReadReply as Obj[]
     return arr?.map |v| { v as Str }?.exclude |v| { v == null } ?: Str[,]
   }
 
@@ -227,41 +299,41 @@ class RedisClient
 // Sorted Set Operations
 //////////////////////////////////////////////////////////////////////////
 
-  ** Add member with score to sorted set
+  ** Add member with score to sorted set (returns 0 if pipelining)
   Int zadd(Str key, Float score, Str member)
   {
     sendCommand(["ZADD", key, score.toStr, member])
-    return readReply as Int ?: 0
+    return maybeReadReply as Int ?: 0
   }
 
-  ** Get members by score range
+  ** Get members by score range (returns empty if pipelining)
   Str[] zrangebyscore(Str key, Float min, Float max)
   {
     minStr := min == Float.negInf ? "-inf" : min.toStr
     maxStr := max == Float.posInf ? "+inf" : max.toStr
     sendCommand(["ZRANGEBYSCORE", key, minStr, maxStr])
-    arr := readReply as Obj[]
+    arr := maybeReadReply as Obj[]
     return arr?.map |v| { v as Str }?.exclude |v| { v == null } ?: Str[,]
   }
 
-  ** Remove members from sorted set
+  ** Remove members from sorted set (returns 0 if pipelining)
   Int zrem(Str key, Str[] members)
   {
     cmd := ["ZREM", key]
     cmd.addAll(members)
     sendCommand(cmd)
-    return readReply as Int ?: 0
+    return maybeReadReply as Int ?: 0
   }
 
 //////////////////////////////////////////////////////////////////////////
 // Key Operations
 //////////////////////////////////////////////////////////////////////////
 
-  ** Find keys matching pattern
+  ** Find keys matching pattern (returns empty if pipelining)
   Str[] keys(Str pattern)
   {
     sendCommand(["KEYS", pattern])
-    arr := readReply as Obj[]
+    arr := maybeReadReply as Obj[]
     return arr?.map |v| { v as Str }?.exclude |v| { v == null } ?: Str[,]
   }
 
@@ -269,14 +341,118 @@ class RedisClient
   Void flushdb()
   {
     sendCommand(["FLUSHDB"])
-    readReply
+    maybeReadReply
   }
 
-  ** Increment value
+  ** Increment value (returns 0 if pipelining)
   Int incr(Str key)
   {
     sendCommand(["INCR", key])
-    return readReply as Int ?: 0
+    return maybeReadReply as Int ?: 0
+  }
+
+//////////////////////////////////////////////////////////////////////////
+// Transactions
+//////////////////////////////////////////////////////////////////////////
+
+  **
+  ** Start a transaction. All subsequent commands will be queued
+  ** until exec() is called.
+  **
+  Void multi()
+  {
+    sendCommand(["MULTI"])
+    readReply  // +OK
+  }
+
+  **
+  ** Execute all commands queued since multi().
+  ** Returns array of results from each queued command.
+  ** If transaction was aborted (e.g., WATCH key modified), returns null.
+  **
+  Obj?[]? exec()
+  {
+    sendCommand(["EXEC"])
+    return readReply as Obj?[]
+  }
+
+  **
+  ** Discard all commands queued since multi().
+  ** Use this to abort a transaction.
+  **
+  Void discard()
+  {
+    sendCommand(["DISCARD"])
+    readReply  // +OK
+  }
+
+  **
+  ** Watch one or more keys for changes.
+  ** If any watched key is modified before exec(), the transaction aborts.
+  **
+  Void watch(Str[] keys)
+  {
+    cmd := ["WATCH"]
+    cmd.addAll(keys)
+    sendCommand(cmd)
+    readReply  // +OK
+  }
+
+  **
+  ** Unwatch all previously watched keys.
+  **
+  Void unwatch()
+  {
+    sendCommand(["UNWATCH"])
+    readReply  // +OK
+  }
+
+//////////////////////////////////////////////////////////////////////////
+// Pipelining
+//////////////////////////////////////////////////////////////////////////
+
+  ** Whether we're currently in pipeline mode
+  private Bool pipelining := false
+
+  ** Count of commands sent during current pipeline
+  private Int pipelineCount := 0
+
+  **
+  ** Execute multiple commands in a single round trip.
+  ** Commands are buffered and sent together, then all responses are read.
+  **
+  ** Example:
+  **   results := redis.pipeline {
+  **     it.set("key1", "val1")
+  **     it.set("key2", "val2")
+  **     it.get("key1")
+  **   }
+  **   // results = ["OK", "OK", "val1"]
+  **
+  Obj?[] pipeline(|This| block)
+  {
+    // Enter pipeline mode
+    pipelining = true
+    pipelineCount = 0
+
+    try
+    {
+      // Execute the block - commands are sent but responses not read
+      block(this)
+
+      // Flush any remaining buffered output
+      out.flush
+
+      // Read all responses
+      results := Obj?[,]
+      pipelineCount.times { results.add(readReply) }
+      return results
+    }
+    finally
+    {
+      pipelining = false
+      pipelineCount = 0
+    }
   }
 
 //////////////////////////////////////////////////////////////////////////
@@ -286,9 +462,13 @@ class RedisClient
   **
   ** Send a command to Redis using RESP protocol.
   ** Commands are sent as arrays: *<count>\r\n$<len>\r\n<arg>\r\n...
+  ** If pipelining, command count is tracked and flush is deferred.
   **
   private Void sendCommand(Str[] args)
   {
+    // Track command count for pipelining
+    if (pipelining) pipelineCount++
+
     // Array header
     out.print("*${args.size}\r\n")
 
@@ -301,7 +481,18 @@ class RedisClient
       out.print("\r\n")
     }
 
-    out.flush
+    // Don't flush during pipeline - wait until all commands are sent
+    if (!pipelining) out.flush
+  }
+
+  **
+  ** Read reply only if not in pipeline mode.
+  ** Returns the reply or null if pipelining.
+  **
+  private Obj? maybeReadReply()
+  {
+    if (pipelining) return null
+    return readReply
   }
 
   **

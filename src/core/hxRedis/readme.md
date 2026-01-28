@@ -1,13 +1,16 @@
 # hxRedis - Redis-Backed Folio Implementation
 
-A pure Fantom implementation of the Folio database API backed by Redis. This provides a transpiler-friendly storage engine that runs natively.
+A pure Fantom implementation of the Folio database API backed by Redis. Provides a storage engine with connection pooling, transactions, and fail-fast error handling.
 
 ## Overview
 
-hxRedis implements the `Folio` abstract class using Redis as the backing store instead of the Java-based hxStore. This enables:
+hxRedis implements the `Folio` abstract class using Redis as the backing store. All data operations go through Redis while reads are served from an in-memory cache for performance.
 
-- **Non-JVM database backend** - Redis instead of Java blob storage
-- **Pure Fantom implementation** - No Java native code, fully transpilable
+**Key characteristics:**
+- **Pure Fantom** - No Java native code, fully transpilable
+- **Robust features** - Connection pooling, socket timeouts, authentication, transactions
+- **Simple API** - Standard Folio interface, drop-in replacement for other implementations
+- **Fail-fast** - Errors surface immediately, no hidden retries or magic
 
 ## Architecture
 
@@ -21,24 +24,31 @@ hxRedis implements the `Folio` abstract class using Redis as the backing store i
 ┌─────────────────────────────────────────┐
 │              HxRedis                    │
 │   - ConcurrentMap cache (in-memory)     │
-│   - Ref interning for identity          │
 │   - Actor for write serialization       │
+│   - Ref interning for object identity   │
 │   - disMacro resolution                 │
+└─────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────┐
+│            RedisConnPool                │
+│   - Lock-based thread-safe pooling      │
+│   - Configurable pool size              │
+│   - Health check support                │
 └─────────────────────────────────────────┘
                     │
                     ▼
 ┌─────────────────────────────────────────┐
 │            RedisClient                  │
 │   - Pure Fantom RESP protocol           │
-│   - inet::TcpSocket networking          │
-│   - No external dependencies            │
+│   - Socket timeouts (5s connect/30s rx) │
+│   - Transactions (MULTI/EXEC)           │
+│   - Pipelining support                  │
 └─────────────────────────────────────────┘
                     │
                     ▼
 ┌─────────────────────────────────────────┐
 │              Redis Server               │
-│   - In-memory key-value store           │
-│   - RDB/AOF persistence                 │
 └─────────────────────────────────────────┘
 ```
 
@@ -56,76 +66,60 @@ idx:tag:{tagName}     → Set of IDs with that tag
 meta:version          → Database version counter
 ```
 
-## Features
+## Design Decisions
 
-### Core CRUD Operations
-- `readById(id)` - Single record lookup
-- `readByIds(ids)` - Batch record lookup
-- `readAll(filter)` - Filter-based queries
-- `readCount(filter)` - Count queries
-- `commit(diff)` - Add, update, remove records
+### Connection Pool Uses Locks, Not Actors
 
-### Advanced Features
-- **Ref Interning** - Same ID always returns same Ref object
-- **Object Identity** - ConcurrentMap cache ensures `verifyRecSame` tests pass
-- **Transient Commits** - Skip Redis persistence for temporary changes
-- **Trash Handling** - Soft delete with trash flag
-- **disMacro Support** - Display macro resolution with cycle detection
-- **Tag Indexes** - Automatic index maintenance for optimized queries
-- **Concurrent Change Detection** - Prevents lost updates
+The pool uses `Lock.makeReentrant` for thread-safe access rather than Fantom Actors. This is because:
 
-### Test Suite Results
+- `RedisClient` holds a mutable TCP socket that cannot be passed in Actor messages (which require immutable types)
+- Connection pools fundamentally need to return mutable objects to callers
+- This matches how standard connection pools work (HikariCP, c3p0, Go's database/sql)
 
-**testFolio (AbstractFolioTest):**
-- 7 types, 23 methods, 9964 verifications - ALL PASSING
+### Transactions Wrap All Commits
 
-**hxRedis internal tests:**
-- 4 types, 41 methods, 1112 verifications - ALL PASSING
+All non-transient folio commits are wrapped in Redis MULTI/EXEC transactions:
 
-### Benchmark Summary
+- Ensures atomic writes - either all records commit or none do
+- Prevents partial failures leaving inconsistent state
+- Transaction is discarded on any error
 
-| Runtime | Query Time | Use Case |
-|---------|------------|----------|
-| Fantom/JVM | 0.228ms | Production, real-time |
-| Python | 21.96ms | Analytics, ML integration |
-| HTTP API | 318.34ms | Remote access |
+### In-Memory Cache for Reads
 
-**Key findings:**
-- Fantom/JVM is ~96x faster than Python for Folio operations
-- Python Redis is 14.5x faster than SkySpark HTTP API
-- Raw Redis ops show minimal overhead (1.1-2.1x) - the difference is in the Folio layer
+All reads come from a `ConcurrentMap` cache, not Redis:
 
-For detailed methodology and analysis, see [benchmarks.md](benchmarks.md).
+- Eliminates network round trips for reads
+- Provides object identity (same Ref object returned for same ID)
+- Cache is populated on startup and maintained on commits
 
+### Fail-Fast Error Handling
+
+No automatic retries or hidden error recovery:
+
+- Socket timeouts surface as `IOErr` immediately
+- Callers decide how to handle failures
+- Explicit `checkHealth()` method when validation is needed
 
 ## Usage
 
 ### Prerequisites
 
 ```bash
-# Install Redis (macOS)
+# Install Redis
 brew install redis
 brew services start redis
 
-# Verify Redis is running
+# Verify
 redis-cli ping  # Should return PONG
 ```
 
-### Building
+### Connection URI
 
-```bash
-cd haxall
-fan src/core/hxRedis/build.fan
 ```
-
-### Running Tests
-
-```bash
-# Run hxRedis internal tests
-fan test hxRedis
-
-# Run against AbstractFolioTest suite
-fan test testFolio
+redis://localhost:6379              # Default
+redis://localhost:6379/2            # Database 2
+redis://:password@localhost:6379    # With authentication
+redis://:password@localhost:6379/0  # Auth + database
 ```
 
 ### Code Example
@@ -143,72 +137,137 @@ config := FolioConfig
 folio := HxRedis.open(config)
 
 // Add a record
-diff := Diff.makeAdd(Etc.dict2("dis", "My Site", "site", Marker.val))
-folio.commit(diff)
+diff := Diff.makeAdd(["dis":"My Site", "site":Marker.val])
+rec := folio.commit(diff).newRec
 
 // Query records
-sites := folio.readAll(Filter.has("site"))
+sites := folio.readAll(Filter("site"))
 
-// Close
+// Close (releases all pooled connections)
 folio.close
+```
+
+### Using RedisClient Directly
+
+For direct Redis access without the Folio layer:
+
+```fantom
+// Basic operations
+redis := RedisClient.open(`redis://localhost:6379`)
+redis.set("key", "value")
+val := redis.get("key")
+redis.close
+
+// Transactions
+redis.multi
+redis.set("a", "1")
+redis.set("b", "2")
+results := redis.exec  // ["OK", "OK"]
+
+// Pipelining (single round trip)
+results := redis.pipeline {
+  it.set("x", "1")
+  it.set("y", "2")
+  it.get("x")
+}
+// results = ["OK", "OK", "1"]
 ```
 
 ## File Structure
 
 ```
 haxall/src/core/hxRedis/
-├── build.fan                 # Pod build configuration
-├── README.md                 # This file
+├── build.fan                     # Pod build configuration
+├── README.md                     # This file
 ├── fan/
-│   ├── HxRedis.fan           # Main Folio implementation (~530 lines)
-│   └── RedisClient.fan       # Redis RESP protocol client (~270 lines)
+│   ├── HxRedis.fan               # Folio implementation
+│   ├── RedisClient.fan           # RESP protocol client
+│   └── RedisConnPool.fan         # Connection pool
 └── test/
-    ├── HxRedisTest.fan       # Basic CRUD tests
-    ├── HxRedisTortureTest.fan  # Stress/edge case tests
-    ├── HxRedisTestImpl.fan   # AbstractFolioTest integration
-    ├── RedisClientTest.fan   # Redis client unit tests
-    └── RedisClientTortureTest.fan  # Redis client stress tests
+    ├── HxRedisTest.fan           # Basic CRUD tests
+    ├── HxRedisTortureTest.fan    # Scale/stress tests
+    ├── HxRedisTestImpl.fan       # AbstractFolioTest integration
+    ├── HxRedisBenchmark.fan      # Performance benchmarks
+    ├── RedisClientTest.fan       # Client unit tests
+    ├── RedisClientTortureTest.fan # Client stress tests
+    └── RedisConnPoolTest.fan     # Pool tests
 ```
 
-## Implementation Details
+## Test Coverage
+
+```bash
+fant hxRedis
+```
+
+**Results:** 70+ test methods covering:
+- Basic CRUD operations
+- Filter queries at scale (1000+ records)
+- Transaction atomicity and WATCH conflicts
+- Connection pool behavior
+- Pipeline operations
+- Edge cases (unicode, binary data, large values)
+
+## API Reference
 
 ### RedisClient
 
-Pure Fantom implementation of the Redis RESP protocol using `inet::TcpSocket`:
+| Method | Description |
+|--------|-------------|
+| `open(uri)` | Connect to Redis with optional auth/db |
+| `close()` | Close connection |
+| `ping()` | Health check, returns "PONG" |
+| `get/set/del` | String operations |
+| `hget/hset/hgetall` | Hash operations |
+| `sadd/srem/smembers` | Set operations |
+| `zadd/zrangebyscore` | Sorted set operations |
+| `multi/exec/discard` | Transactions |
+| `watch/unwatch` | Optimistic locking |
+| `pipeline { }` | Batch commands in single round trip |
 
-- **No external JARs** - Just Fantom's built-in networking
-- **Full RESP support** - Strings, hashes, sets, sorted sets
+### RedisConnPool
+
+| Method | Description |
+|--------|-------------|
+| `make(uri, poolSize)` | Create pool (default 3 connections) |
+| `execute { }` | Run callback with pooled connection |
+| `close()` | Close all connections |
+| `checkHealth()` | Validate connections with PING |
+| `debug()` | Pool statistics |
 
 ### HxRedis
 
-Folio implementation following the FolioFlatFile pattern:
+Standard Folio interface plus:
 
-- **ConcurrentMap cache** - In-memory record storage for fast reads
-- **Actor for writes** - Serialized write operations prevent race conditions
-- **Ref interning** - `internRef()` ensures object identity
-- **disMacro** - Uses Macro class with custom refToDis resolution
-
-### Test Framework Integration
-
-The `HxRedisTestImpl` class integrates with AbstractFolioTest:
-
-```fantom
-class HxRedisTestImpl : FolioTestImpl
-{
-  override Str name() { "hxRedis" }
-  override Bool supportsHis() { false }
-  override Bool supportsIdPrefixRename() { false }
-  // ...
-}
-```
+| Method | Description |
+|--------|-------------|
+| `open(config)` | Open folio with redisUri in opts |
+| `readById/readAll` | Reads from in-memory cache |
+| `commit` | Writes via transaction to Redis |
+| `internRef` | Ref interning for object identity |
 
 ## Limitations
 
-- **History API** - Not yet implemented (Phase 6)
-- **FolioBackup** - Throws UnsupportedErr
-- **FolioFile** - Throws UnsupportedErr
+- **History API** - Not implemented (`his()` throws UnsupportedErr)
+- **FolioBackup** - Not implemented
+- **FolioFile** - Not implemented
 - **idPrefixRename** - Not supported
 
+## Redis Server Configuration
+
+Recommended Redis settings:
+
+```conf
+# Persistence
+appendonly yes
+appendfsync everysec
+
+# Memory
+maxmemory 256mb
+maxmemory-policy allkeys-lru
+
+# Security
+requirepass your-password-here
+```
 
 ## License
 

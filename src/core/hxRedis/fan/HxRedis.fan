@@ -4,6 +4,7 @@
 //
 // History:
 //   27 Jan 2026  Trevor Adelman  Creation
+//   28 Jan 2026  Trevor Adelman  Add logging for better observability
 //
 
 using concurrent
@@ -26,6 +27,9 @@ const class HxRedis : Folio
 // Construction
 //////////////////////////////////////////////////////////////////////////
 
+  ** Logger for HxRedis operations (named hxRedisLog to avoid conflict with Folio.log)
+  private static const Log hxRedisLog := Log.get("hxRedis")
+
   **
   ** Open for given directory/config. Redis URI comes from config opts.
   ** Default: redis://localhost:6379/0
@@ -33,6 +37,7 @@ const class HxRedis : Folio
   static HxRedis open(FolioConfig config)
   {
     redisUri := config.opts["redisUri"] as Uri ?: `redis://localhost:6379/0`
+    hxRedisLog.debug("Opening HxRedis folio: ${config.name} -> $redisUri")
     return make(config, redisUri)
   }
 
@@ -54,12 +59,24 @@ const class HxRedis : Folio
 
       // Load all records into memory cache
       allIds := redis.smembers("idx:all")
+      loadCount := 0
+      failCount := 0
       allIds.each |idStr|
       {
         id := internRef(Ref.fromStr(idStr))
         rec := loadRecFromRedis(redis, id)
-        if (rec != null) map.set(id, rec)
+        if (rec != null)
+        {
+          map.set(id, rec)
+          loadCount++
+        }
+        else
+        {
+          failCount++
+        }
       }
+      hxRedisLog.debug("HxRedis initialized: loaded $loadCount records, version=${curVerRef.val}" +
+               (failCount > 0 ? ", failed=$failCount" : ""))
     }
     finally redis.close
   }
@@ -127,6 +144,7 @@ const class HxRedis : Folio
     }
     catch (Err e)
     {
+      hxRedisLog.warn("Failed to parse record $id during init: $e.msg")
       return null
     }
   }
@@ -145,7 +163,9 @@ const class HxRedis : Folio
 
   @NoDoc override FolioFuture doCloseAsync()
   {
-    FolioFuture.makeSync(CountFolioRes(0))
+    // Send close message to actor to cleanup connection pool
+    actor.send(HxRedisMsg("close", null, null))
+    return FolioFuture.makeSync(CountFolioRes(0))
   }
 
   @NoDoc override FolioRec? doReadRecById(Ref id)
@@ -365,6 +385,7 @@ const class HxRedis : Folio
     }
     catch (Err e)
     {
+      hxRedisLog.warn("Failed to parse record $id from Redis: $e.msg")
       return null
     }
   }
@@ -395,12 +416,10 @@ const class HxRedis : Folio
 
   **
   ** Remove a record from Redis.
+  ** oldRec must be passed in because we can't read inside a MULTI transaction.
   **
-  private Void removeRecFromRedis(RedisClient redis, Ref id)
+  private Void removeRecFromRedis(RedisClient redis, Ref id, Dict? oldRec)
   {
-    // Get existing record to clean up indexes
-    oldRec := readRecFromRedis(redis, id)
-
     key := "rec:${id}"
     redis.del([key])
     redis.srem("idx:all", [id.toStr])
@@ -465,14 +484,67 @@ const class HxRedis : Folio
     switch (msg.id)
     {
       case "commit":  return onCommit(msg.a, msg.b)
+      case "close":   return onClose
       default:        throw Err("Invalid msg: $msg")
     }
   }
 
+  **
+  ** Get or create the Redis connection pool.
+  ** Pool is stored in Actor.locals for reuse across commits.
+  **
+  private RedisConnPool getPool()
+  {
+    pool := Actor.locals["redisPool"] as RedisConnPool
+    if (pool == null)
+    {
+      pool = RedisConnPool(redisUri)
+      Actor.locals["redisPool"] = pool
+      hxRedisLog.debug("Created Redis connection pool for Actor")
+    }
+    return pool
+  }
+
+  **
+  ** Apply a single diff to the in-memory cache and optionally to Redis.
+  ** Extracted from onCommit to avoid nested closure (Python transpiler limitation).
+  **
+  private Void applyDiffToCache(Diff diff, Int i, RedisClient redis, HxRedisCommit[] commits)
+  {
+    id := internRef(diff.id)
+    if (diff.isRemove)
+    {
+      map.remove(id)
+      if (!diff.isTransient)
+        removeRecFromRedis(redis, diff.id, commits[i].oldRec)
+    }
+    else
+    {
+      map.set(id, diff.newRec)
+      if (!diff.isTransient)
+        writeRecToRedis(redis, diff.newRec, commits[i].oldRec)
+    }
+  }
+
+  **
+  ** Close the pool when folio is closed.
+  **
+  private Obj? onClose()
+  {
+    pool := Actor.locals["redisPool"] as RedisConnPool
+    if (pool != null)
+    {
+      pool.close
+      Actor.locals.remove("redisPool")
+      hxRedisLog.debug("Closed Redis connection pool")
+    }
+    return null
+  }
+
   private CommitFolioRes onCommit(Diff[] diffs, Obj? cxInfo)
   {
-    redis := RedisClient.open(redisUri)
-    try
+    pool := getPool
+    return pool.execute |redis->CommitFolioRes|
     {
       // Map diffs to commit handlers
       newMod := DateTime.nowUtc(null)
@@ -494,41 +566,53 @@ const class HxRedis : Folio
       // Apply to compute new record Dict
       diffs = commits.map |c->Diff| { c.apply }
 
-      // Update in-memory cache; only update Redis for non-transient
-      diffs.each |diff, i|
+      // Check if any diffs are non-transient (require Redis persistence)
+      hasNonTransient := diffs.any |d| { !d.isTransient }
+
+      // Start Redis transaction for non-transient commits
+      // This ensures atomic writes - either all succeed or none do
+      if (hasNonTransient) redis.multi
+
+      try
       {
-        id := internRef(diff.id)
-        if (diff.isRemove)
+        // Update in-memory cache; only update Redis for non-transient
+        // Note: Extracted to method to avoid nested closure (Python transpiler limitation)
+        diffs.each |diff, i| { applyDiffToCache(diff, i, redis, commits) }
+
+        // Update version if non-transient
+        if (hasNonTransient)
         {
-          map.remove(id)
-          if (!diff.isTransient)
-            removeRecFromRedis(redis, diff.id)
+          newVer := curVerRef.incrementAndGet
+          redis.set("meta:version", newVer.toStr)
         }
-        else
+
+        // Execute Redis transaction
+        if (hasNonTransient)
         {
-          map.set(id, diff.newRec)
-          if (!diff.isTransient)
-            writeRecToRedis(redis, diff.newRec, commits[i].oldRec)
+          results := redis.exec
+          if (results == null)
+            throw Err("Redis transaction aborted (concurrent modification)")
         }
       }
+      catch (Err e)
+      {
+        // Discard transaction on error
+        if (hasNonTransient)
+        {
+          try { redis.discard } catch {}
+        }
+        throw e
+      }
 
-      // Post commit
+      // Post commit (only after successful Redis write)
       commits.each |c|
       {
         hooks.postCommit(c.event)
       }
 
-      // Update version if not transient
-      if (!diffs.first.isTransient)
-      {
-        newVer := curVerRef.incrementAndGet
-        redis.set("meta:version", newVer.toStr)
-      }
-
       // Return result diffs
       return CommitFolioRes(diffs)
     }
-    finally redis.close
   }
 }
 
