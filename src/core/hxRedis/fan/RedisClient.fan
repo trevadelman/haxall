@@ -544,13 +544,14 @@ class RedisClient
         while (remaining > 0)
         {
           read := in.readBuf(buf, remaining)
-          if (read == null) throw RedisErr("Unexpected end of stream")
+          if (read == null) throw RedisErr("Unexpected end of stream reading bulk string")
           remaining -= read
         }
         in.readChar  // \r
         in.readChar  // \n
-        // Use readChars to preserve exact bytes without line ending conversion
-        return buf.seek(0).readChars(len)
+        // Convert bytes to string - len is byte count, not char count
+        // UTF-8 multi-byte chars mean byte count != char count
+        return buf.seek(0).readAllStr
 
       // Array: *<count>\r\n<elements>
       case '*':
