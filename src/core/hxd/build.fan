@@ -42,6 +42,7 @@ class Build : BuildPod
                "hx @{hx.depend}",
                "hxm @{hx.depend}",
                "hxFolio @{hx.depend}",
+               "hxRedis @{hx.depend}",
                "hxUtil @{hx.depend}"]
     srcDirs = [`fan/`, `fan/user/`]
     resDirs = [`locale/`, `res/`]

@@ -15,6 +15,7 @@ using folio
 using hx
 using hxm
 using hxFolio
+using hxRedis
 using hxUtil
 
 **
@@ -59,16 +60,40 @@ class HxdBoot : HxBoot
 
   override Folio initFolio()
   {
+    // Check environment for folio type selection
+    // Configured via env.HAXALL_FOLIO_TYPE in fan.props or shell environment
+    // Options: hxfolio (default), flatfile, redis
+    folioType := Env.cur.vars["HAXALL_FOLIO_TYPE"] ?: "hxfolio"
+
     config := FolioConfig
     {
       it.name = "haxall"
       it.dir  = this.dbDir
       it.pool = ActorPool { it.name = "Hxd-Folio" }
     }
-    // PYTHON-FANTOM: Temporarily use FolioFlatFile instead of HxFolio
-    // to avoid hxStore Java dependency. See readme.md for details.
-    // Original: return HxFolio.open(config)
-    return FolioFlatFile.open(config)
+
+    switch (folioType)
+    {
+      case "redis":
+        redisUri := Env.cur.vars["HAXALL_REDIS_URI"] ?: "redis://localhost:6379/0"
+        redisConfig := FolioConfig
+        {
+          it.name = "haxall"
+          it.dir  = this.dbDir
+          it.pool = ActorPool { it.name = "Hxd-Folio" }
+          it.opts = Etc.dict1("redisUri", Uri(redisUri))
+        }
+        log.info("Using HxRedis folio (uri=$redisUri)")
+        return HxRedis.open(redisConfig)
+
+      case "flatfile":
+        log.info("Using FolioFlatFile folio")
+        return FolioFlatFile.open(config)
+
+      default:  // "hxfolio" or unset
+        log.info("Using HxFolio folio")
+        return HxFolio.open(config)
+    }
   }
 
   override SysInfo initSysInfo()

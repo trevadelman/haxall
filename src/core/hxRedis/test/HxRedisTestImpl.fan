@@ -72,7 +72,7 @@ class HxRedisTestImpl : FolioTestImpl
   }
 
   override Bool supportsTransient() { true }
-  override Bool supportsHis() { false }
+  override Bool supportsHis() { true }  // History API now implemented via HxRedisHis
   override Bool supportsFolioX() { false }
   override Bool supportsIdPrefixRename() { false }
 }

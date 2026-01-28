@@ -1,13 +1,14 @@
 # hxRedis - Redis-Backed Folio Implementation
 
-A pure Fantom implementation of the Folio database API backed by Redis. Provides a storage engine with connection pooling, transactions, and fail-fast error handling.
+A pure Fantom implementation of the Folio database API backed by Redis. Provides a storage engine with connection pooling, transactions, history API, and fail-fast error handling.
 
 ## Overview
 
-hxRedis implements the `Folio` abstract class using Redis as the backing store. All data operations go through Redis while reads are served from an in-memory cache for performance.
+hxRedis implements the `Folio` abstract class using Redis as the backing store. All data operations go through Redis while reads are served from an in-memory cache for performance. History data is stored in Redis Sorted Sets for efficient time-range queries.
 
 **Key characteristics:**
-- **Pure Fantom** - No Java native code, fully transpilable
+- **Pure Fantom** - No Java native code, fully transpilable to Python
+- **Complete Folio API** - CRUD operations, filter queries, history read/write
 - **Robust features** - Connection pooling, socket timeouts, authentication, transactions
 - **Simple API** - Standard Folio interface, drop-in replacement for other implementations
 - **Fail-fast** - Errors surface immediately, no hidden retries or magic
@@ -17,7 +18,7 @@ hxRedis implements the `Folio` abstract class using Redis as the backing store. 
 ```
 ┌─────────────────────────────────────────┐
 │         Folio API (folio pod)           │
-│   readById, readAll, commit, etc.       │
+│   readById, readAll, commit, his, etc.  │
 └─────────────────────────────────────────┘
                     │
                     ▼
@@ -27,6 +28,14 @@ hxRedis implements the `Folio` abstract class using Redis as the backing store. 
 │   - Actor for write serialization       │
 │   - Ref interning for object identity   │
 │   - disMacro resolution                 │
+└─────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────┐
+│            HxRedisHis                   │
+│   - History read/write via FolioHis     │
+│   - Sorted Sets for time-series data    │
+│   - Timezone/unit conversion on read    │
 └─────────────────────────────────────────┘
                     │
                     ▼
@@ -57,6 +66,9 @@ hxRedis implements the `Folio` abstract class using Redis as the backing store. 
 ```
 # Records stored as Hashes
 rec:{id}              → trio (Trio-encoded Dict), mod (timestamp)
+
+# History stored as Sorted Sets
+his:{id}              → Sorted Set (score=timestamp ms, value=Trio-encoded HisItem)
 
 # Indexes
 idx:all               → Set of all record IDs
@@ -91,6 +103,14 @@ All reads come from a `ConcurrentMap` cache, not Redis:
 - Eliminates network round trips for reads
 - Provides object identity (same Ref object returned for same ID)
 - Cache is populated on startup and maintained on commits
+
+### History Uses Sorted Sets
+
+History data leverages Redis Sorted Sets for time-series storage:
+
+- Score = timestamp in milliseconds (enables range queries)
+- O(log N) insert, O(log N + M) range queries
+- ZADD for writes, ZRANGEBYSCORE for reads, ZREMRANGEBYSCORE for clears
 
 ### Fail-Fast Error Handling
 
@@ -147,6 +167,45 @@ sites := folio.readAll(Filter("site"))
 folio.close
 ```
 
+### History API Example
+
+```fantom
+// Create a history point
+tz := TimeZone("New_York")
+pointTags := Etc.dictx(
+  "dis", "Temperature Sensor",
+  "point", Marker.val,
+  "his", Marker.val,
+  "tz", "New_York",
+  "kind", "Number"
+)
+point := folio.commit(Diff.makeAdd(pointTags)).newRec
+
+// Write history items
+date := Date("2024-01-15")
+items := [
+  HisItem(date.toDateTime(Time("00:00:00"), tz), n(72.5)),
+  HisItem(date.toDateTime(Time("01:00:00"), tz), n(73.0)),
+  HisItem(date.toDateTime(Time("02:00:00"), tz), n(73.5)),
+]
+result := folio.his.write(point.id, items)
+echo("Wrote ${result.get("count")} items")
+
+// Read history back
+folio.his.read(point.id, null, null) |item|
+{
+  echo("${item.ts}: ${item.val}")
+}
+
+// Read with span (time range query)
+span := Span(date.toDateTime(Time("00:30:00"), tz),
+             date.toDateTime(Time("01:30:00"), tz))
+folio.his.read(point.id, span, null) |item|
+{
+  echo("${item.ts}: ${item.val}")
+}
+```
+
 ### Using RedisClient Directly
 
 For direct Redis access without the Folio layer:
@@ -181,6 +240,7 @@ haxall/src/core/hxRedis/
 ├── README.md                     # This file
 ├── fan/
 │   ├── HxRedis.fan               # Folio implementation
+│   ├── HxRedisHis.fan            # History API implementation
 │   ├── RedisClient.fan           # RESP protocol client
 │   └── RedisConnPool.fan         # Connection pool
 └── test/
@@ -196,10 +256,19 @@ haxall/src/core/hxRedis/
 ## Test Coverage
 
 ```bash
-fant hxRedis
+fant testFolio   # Full Folio test suite
+fant hxRedis     # hxRedis-specific tests
 ```
 
-**Results:** 70+ test methods covering:
+**testFolio Results:** 10,000+ verifications across all Folio implementations including:
+- Basic CRUD operations (testBasics)
+- Filter queries (testFilters)
+- Trash management (testTrash)
+- Type handling (testKinds)
+- History read/write (HisTest.testBasics, HisTest.testConfig)
+- Hooks (testHooks including postHisWrite)
+
+**hxRedis Results:** 70+ test methods covering:
 - Basic CRUD operations
 - Filter queries at scale (1000+ records)
 - Transaction atomicity and WATCH conflicts
@@ -219,7 +288,7 @@ fant hxRedis
 | `get/set/del` | String operations |
 | `hget/hset/hgetall` | Hash operations |
 | `sadd/srem/smembers` | Set operations |
-| `zadd/zrangebyscore` | Sorted set operations |
+| `zadd/zrangebyscore/zremrangebyscore` | Sorted set operations |
 | `multi/exec/discard` | Transactions |
 | `watch/unwatch` | Optimistic locking |
 | `pipeline { }` | Batch commands in single round trip |
@@ -243,11 +312,31 @@ Standard Folio interface plus:
 | `open(config)` | Open folio with redisUri in opts |
 | `readById/readAll` | Reads from in-memory cache |
 | `commit` | Writes via transaction to Redis |
+| `his` | Returns HxRedisHis for history operations |
 | `internRef` | Ref interning for object identity |
+
+### HxRedisHis
+
+| Method | Description |
+|--------|-------------|
+| `read(id, span, opts, f)` | Read history items for record |
+| `write(id, items, opts)` | Write history items to record |
+
+**Read options:**
+- `limit`: Maximum items to return
+- `clipFuture`: Clip items after current time
+
+**Write options:**
+- `clear`: Span of items to clear before write
+- `clearAll`: Clear all history before write
+
+**Behavior:**
+- Timestamps converted to record's `tz` tag on read
+- Units applied from record's `unit` tag on read
+- Transient tags (hisSize, hisStart, hisEnd) updated automatically
 
 ## Limitations
 
-- **History API** - Not implemented (`his()` throws UnsupportedErr)
 - **FolioBackup** - Not implemented
 - **FolioFile** - Not implemented
 - **idPrefixRename** - Not supported

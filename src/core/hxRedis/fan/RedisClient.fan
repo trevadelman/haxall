@@ -325,6 +325,22 @@ class RedisClient
     return maybeReadReply as Int ?: 0
   }
 
+  ** Remove members by score range (returns count removed, 0 if pipelining)
+  Int zremrangebyscore(Str key, Float min, Float max)
+  {
+    minStr := min == Float.negInf ? "-inf" : min.toStr
+    maxStr := max == Float.posInf ? "+inf" : max.toStr
+    sendCommand(["ZREMRANGEBYSCORE", key, minStr, maxStr])
+    return maybeReadReply as Int ?: 0
+  }
+
+  ** Get count of members in sorted set (returns 0 if pipelining)
+  Int zcard(Str key)
+  {
+    sendCommand(["ZCARD", key])
+    return maybeReadReply as Int ?: 0
+  }
+
 //////////////////////////////////////////////////////////////////////////
 // Key Operations
 //////////////////////////////////////////////////////////////////////////

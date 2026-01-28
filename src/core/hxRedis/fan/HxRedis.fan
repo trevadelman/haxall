@@ -297,7 +297,8 @@ const class HxRedis : Folio
     return FolioFuture(actor.send(HxRedisMsg("commit", diffs, cxInfo)))
   }
 
-  @NoDoc override FolioHis his() { throw UnsupportedErr() }
+  @NoDoc override FolioHis his() { hisRef }
+  private const HxRedisHis hisRef := HxRedisHis(this)
 
   @NoDoc override FolioBackup backup() { throw UnsupportedErr() }
 
@@ -492,8 +493,9 @@ const class HxRedis : Folio
   **
   ** Get or create the Redis connection pool.
   ** Pool is stored in Actor.locals for reuse across commits.
+  ** Internal visibility for HxRedisHis access.
   **
-  private RedisConnPool getPool()
+  internal RedisConnPool getPool()
   {
     pool := Actor.locals["redisPool"] as RedisConnPool
     if (pool == null)
