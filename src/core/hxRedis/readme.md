@@ -151,7 +151,37 @@ redis://:password@localhost:6379    # With authentication
 redis://:password@localhost:6379/0  # Auth + database
 ```
 
-### Code Example
+### Using with Haxall Daemon (Recommended)
+
+The simplest way to use hxRedis is with the Haxall daemon via `fan.props`:
+
+**1. Configure fan.props:**
+```bash
+# In your project's fan.props file:
+env.HAXALL_FOLIO_TYPE=redis
+env.HAXALL_REDIS_URI=redis://localhost:6379/0
+```
+
+**2. Initialize database:**
+```bash
+fan/bin/fan hx::Main init -headless -suUser su -suPass admin /path/to/db
+```
+
+**3. Run daemon:**
+```bash
+fan/bin/fan hx::Main run /path/to/db
+# Access at http://localhost:8080
+```
+
+All Haxall features work normally:
+- Axon shell for queries
+- Extensions (points, tasks, connectors)
+- History read/write
+- Web UI
+
+The database stores all data in Redis instead of binary blobs on disk.
+
+### Direct Folio API Example
 
 ```fantom
 // Create config
@@ -269,7 +299,7 @@ fant testFolio   # Full Folio test suite
 fant hxRedis     # hxRedis-specific tests
 ```
 
-**testFolio Results:** 10,000+ verifications across all Folio implementations including:
+**testFolio Results:** All tests passing - 10,000+ verifications across all Folio implementations including:
 - Basic CRUD operations (testBasics)
 - Filter queries (testFilters)
 - Trash management (testTrash)
@@ -277,7 +307,7 @@ fant hxRedis     # hxRedis-specific tests
 - History read/write (HisTest.testBasics, HisTest.testConfig)
 - Hooks (testHooks including postHisWrite)
 
-**hxRedis Results:** 70+ test methods covering:
+**hxRedis Results:** 63 test methods covering:
 - Basic CRUD operations
 - Filter queries at scale (1000+ records)
 - Transaction atomicity and WATCH conflicts
