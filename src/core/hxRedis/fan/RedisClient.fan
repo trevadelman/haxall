@@ -551,7 +551,8 @@ class RedisClient
         in.readChar  // \n
         // Convert bytes to string - len is byte count, not char count
         // UTF-8 multi-byte chars mean byte count != char count
-        return buf.seek(0).readAllStr
+        // IMPORTANT: pass false to disable line ending normalization (\r\n -> \n)
+        return buf.seek(0).readAllStr(false)
 
       // Array: *<count>\r\n<elements>
       case '*':
