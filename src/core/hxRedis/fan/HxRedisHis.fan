@@ -76,11 +76,10 @@ const class HxRedisHis : FolioHis
     Unit? unit := null
     if (unitStr != null) unit = Number.loadUnit(unitStr, false)
 
-    // Get history from Redis using direct connection
-    // (HxRedisHis runs on any thread, not the Actor thread)
+    // Get history from Redis using connection pool
     key := hisKey(id)
-    redis := RedisClient.open(folio.redisUri)
-    try
+    pool := folio.getPool
+    pool.execute |redis|
     {
       // Query all items from Redis (we'll filter in memory for span logic)
       allEncoded := redis.zrangebyscore(key, Float.negInf, Float.posInf)
@@ -169,10 +168,7 @@ const class HxRedisHis : FolioHis
           }
         }
       }
-    }
-    finally
-    {
-      redis.close
+      return null
     }
   }
 
@@ -201,14 +197,14 @@ const class HxRedisHis : FolioHis
     // Validate using existing FolioUtil - this handles all the edge cases (including trash check)
     validatedItems := items.isEmpty ? items : FolioUtil.hisWriteCheck(rec, items, opts)
 
-    // Get history key and open direct connection
-    // (HxRedisHis runs on any thread, not the Actor thread)
+    // Get history key and use connection pool
     key := hisKey(id)
-    redis := RedisClient.open(folio.redisUri)
     writeCount := 0
     HisItem? firstItem := null
     HisItem? lastItem := null
-    try
+
+    pool := folio.getPool
+    pool.execute |redis|
     {
       // Handle clear options first
       if (opts.has("clearAll"))
@@ -278,10 +274,7 @@ const class HxRedisHis : FolioHis
         newRec.id.disVal = rec.id.disVal
         folio.map.set(folio.internRef(id), newRec)
       }
-    }
-    finally
-    {
-      redis.close
+      return null
     }
 
     // Build result dict with count and span

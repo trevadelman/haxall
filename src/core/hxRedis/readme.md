@@ -42,8 +42,9 @@ hxRedis implements the `Folio` abstract class using Redis as the backing store. 
 ┌─────────────────────────────────────────┐
 │            RedisConnPool                │
 │   - Lock-based thread-safe pooling      │
-│   - Configurable pool size              │
-│   - Health check support                │
+│   - PING validation on conn checkout│
+│   - Automatic connection replacement     │
+│   - Overflow connection tracking         │
 └─────────────────────────────────────────┘
                     │
                     ▼
@@ -103,6 +104,14 @@ All reads come from a `ConcurrentMap` cache, not Redis:
 - Eliminates network round trips for reads
 - Provides object identity (same Ref object returned for same ID)
 - Cache is populated on startup and maintained on commits
+
+### Connection Pool Validates on Checkout
+
+Connections are validated with PING before being returned to callers:
+
+- Stale/dead connections are automatically replaced
+- Overflow connections (when pool exhausted) are tracked and closed properly
+- No silent failures from bad connections
 
 ### History Uses Sorted Sets
 
@@ -299,9 +308,9 @@ fant hxRedis     # hxRedis-specific tests
 |--------|-------------|
 | `make(uri, poolSize)` | Create pool (default 3 connections) |
 | `execute { }` | Run callback with pooled connection |
-| `close()` | Close all connections |
-| `checkHealth()` | Validate connections with PING |
-| `debug()` | Pool statistics |
+| `close()` | Close all connections (including overflow) |
+| `checkHealth()` | Validate and replace dead connections |
+| `debug()` | Pool statistics (total, available, errors) |
 
 ### HxRedis
 

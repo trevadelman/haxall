@@ -86,26 +86,73 @@ class RedisConnPool
   **
   ** Get a connection from the pool.
   ** Creates new connection if pool is exhausted.
+  ** Validates connection with PING before returning.
   **
   private RedisClient checkout()
   {
     mutex.lock
+    RedisClient? conn := null
     try
     {
       if (closed) throw Err("Pool is closed")
 
       if (available.isEmpty)
       {
-        // Pool exhausted - will create new connection after unlock
-        return RedisClient.open(uri)
+        // Pool exhausted - create new connection and track it
+        log.debug("Pool exhausted, creating overflow connection")
+        conn = RedisClient.open(uri)
+        allConns.add(conn)
       }
       else
       {
         // Get connection from pool
-        return available.pop
+        conn = available.pop
       }
     }
     finally { mutex.unlock }
+
+    // Validate connection before returning (outside lock)
+    if (conn != null)
+    {
+      try
+      {
+        if (conn.ping != "PONG")
+        {
+          // Connection is bad - close it and create a new one
+          log.debug("Connection failed PING validation, replacing")
+          try { conn.close } catch {}
+          conn = replaceConnection(conn)
+        }
+      }
+      catch (Err e)
+      {
+        // Connection is dead - close it and create a new one
+        log.debug("Connection validation failed: $e.msg")
+        try { conn.close } catch {}
+        conn = replaceConnection(conn)
+      }
+    }
+
+    return conn
+  }
+
+  **
+  ** Replace a bad connection with a new one.
+  ** Removes old from tracking and adds new.
+  **
+  private RedisClient replaceConnection(RedisClient bad)
+  {
+    mutex.lock
+    try { allConns.remove(bad) }
+    finally { mutex.unlock }
+
+    newConn := RedisClient.open(uri)
+
+    mutex.lock
+    try { allConns.add(newConn) }
+    finally { mutex.unlock }
+
+    return newConn
   }
 
   **
