@@ -46,41 +46,65 @@ class XetoJsonReader
     return convertScalar(ns, x, spec)
   }
 
-  private Dict convertDict(MNamespace ns, Dict dict, Spec? spec)
+  private Obj convertDict(MNamespace ns, Dict dict, Spec? spec)
   {
-    // If the spec is null, try to look it up
+    // if the spec is null, try to look it up
     if (spec == null)
     {
-      if (dict.has("spec"))
-        spec = ns.spec(dict->spec)
+      specRef := dict["spec"]
+      if (specRef != null)
+        spec = ns.spec(specRef.toStr)
     }
+
+    // check for Grid special case
+    if (spec != null && spec.isGrid)
+      return convertGrid(ns, dict)
 
     members := (spec == null) ? null : spec.members
-    map := Str:Obj[:]
 
-    // each entry
-    dict.each |v, k|
+    // map dict pairs
+    dict = dict.map |v, k|
     {
       // id and spec are Refs (and they do not have member entries)
-      if (k == "id" || k == "spec")
-      {
-        map[k] = Ref.fromStr(v)
-      }
-      // handle normally
-      else
-      {
-        mspec := (members == null) ? null : members.get(k, false)
-        map[k] = convert(ns, v, mspec)
-      }
-    }
+      if (k == "id" || k == "spec") return Ref.fromStr(v)
 
-    // convert to dict
-    dict = Etc.dictFromMap(map)
+      // handle normally
+      mspec := (members == null) ? null : members.get(k, false)
+      return convert(ns, v, mspec)
+    }
 
     // apply spec binding, if we are not haystack
     if ((spec != null) && (fidelity !== XetoFidelity.haystack))
       dict = spec.binding.decodeDict(dict)
     return dict
+  }
+
+  private Grid convertGrid(MNamespace ns, Dict dict)
+  {
+    gb := GridBuilder()
+
+    // meta
+    meta := dict["meta"]
+    if (meta != null)
+      gb.setMeta(convert(ns, meta, null))
+
+    // cols
+    cols := dict["cols"] as Obj?[] ?: throw Err("Grid missing 'cols' list")
+    cols.each |Dict col|
+    {
+      meta = col["meta"]
+      if (meta == null)
+        gb.addCol(col->name)
+      else
+        gb.addCol(col->name, convert(ns, meta, null))
+    }
+
+    // rows
+    rows := dict["rows"] as Obj?[] ?: throw Err("Grid missing 'rows' list")
+    rows.each |r| { gb.addDictRow(convert(ns, r, null)) }
+
+    // done
+    return gb.toGrid
   }
 
   private Obj?[] convertList(MNamespace ns, Obj?[] from, Spec? spec)
@@ -99,6 +123,8 @@ class XetoJsonReader
     {
       if (x is Str)
       {
+        if ((spec == null) && (x == "✓"))
+          return Marker.val
         if ((spec != null) && spec.type.isHaystack)
           return spec.binding.decodeScalar(x)
       }
@@ -109,6 +135,8 @@ class XetoJsonReader
     {
       if (x is Str)
       {
+        if ((spec == null) && (x == "✓"))
+          return Marker.val
         if (spec != null)
           return spec.binding.decodeScalar(x)
       }
@@ -136,6 +164,6 @@ internal class XetoJsonInStream : JsonInStream
 {
   internal new make(InStream in) : super(in) {}
 
-  override Obj transformObj(Str:Obj? obj) { return Etc.makeDict(obj) }
+  override Obj transformObj(Str:Obj? obj) { Etc.makeDict(obj) }
 }
 
