@@ -33,6 +33,7 @@ class Build : BuildPod
                "xeto @{hx.depend}",
                "haystack @{hx.depend}"]
     srcDirs = [`fan/`]
+    index   = ["hxd.folio.hxFlatFile": "folio::FolioFlatFile"]
   }
 }
 

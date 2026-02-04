@@ -37,6 +37,9 @@ class Build : BuildPod
     // Python native directory for transpilation
     // pyDirs = [`py/`]
     docApi  = false
-    index   = ["testFolio.impl": "hxRedis::HxRedisTestImpl"]
+    index   = [
+      "hxd.folio.hxRedis": "hxRedis::HxRedis",
+      "testFolio.impl": "hxRedis::HxRedisTestImpl"
+    ]
   }
 }

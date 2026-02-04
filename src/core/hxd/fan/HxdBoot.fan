@@ -15,7 +15,6 @@ using folio
 using hx
 using hxm
 using hxFolio
-using hxRedis
 using hxUtil
 
 **
@@ -60,11 +59,12 @@ class HxdBoot : HxBoot
 
   override Folio initFolio()
   {
-    // Check environment for folio type selection
-    // Configured via env.HAXALL_FOLIO_TYPE in fan.props or shell environment
-    // Options: hxfolio (default), flatfile, redis
-    folioType := Env.cur.vars["HAXALL_FOLIO_TYPE"] ?: "hxfolio"
+    // Folio backend selection via environment variable
+    // Implementations register via indexed.props with key "hxd.folio.{name}"
+    // Each implementation reads its own config from env vars
+    folioType := Env.cur.vars["HAXALL_FOLIO_TYPE"] ?: "hxFolio"
 
+    // Build base config - implementations add their own opts
     config := FolioConfig
     {
       it.name = "haxall"
@@ -72,28 +72,15 @@ class HxdBoot : HxBoot
       it.pool = ActorPool { it.name = "Hxd-Folio" }
     }
 
-    switch (folioType)
-    {
-      case "redis":
-        redisUri := Env.cur.vars["HAXALL_REDIS_URI"] ?: "redis://localhost:6379/0"
-        redisConfig := FolioConfig
-        {
-          it.name = "haxall"
-          it.dir  = this.dbDir
-          it.pool = ActorPool { it.name = "Hxd-Folio" }
-          it.opts = Etc.dict1("redisUri", Uri(redisUri))
-        }
-        log.info("Using HxRedis folio (uri=$redisUri)")
-        return HxRedis.open(redisConfig)
+    // Lookup folio implementation via indexed.props
+    qnames := Env.cur.index("hxd.folio.$folioType")
+    if (qnames.isEmpty)
+      throw Err("Unknown folio type '$folioType'")
 
-      case "flatfile":
-        log.info("Using FolioFlatFile folio")
-        return FolioFlatFile.open(config)
-
-      default:  // "hxfolio" or unset
-        log.info("Using HxFolio folio")
-        return HxFolio.open(config)
-    }
+    qname := qnames.first
+    log.info("Using $qname folio")
+    type := Type.find(qname)
+    return type.method("open").call(config)
   }
 
   override SysInfo initSysInfo()

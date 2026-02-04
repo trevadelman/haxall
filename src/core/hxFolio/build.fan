@@ -35,5 +35,6 @@ class Build : BuildPod
                "hxStore @{hx.depend}"]
     srcDirs = [`fan/`, `test/`]
     docApi   = false
+    index   = ["hxd.folio.hxFolio": "hxFolio::HxFolio"]
   }
 }

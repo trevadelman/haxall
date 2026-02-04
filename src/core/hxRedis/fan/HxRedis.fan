@@ -31,12 +31,20 @@ const class HxRedis : Folio
   private static const Log hxRedisLog := Log.get("hxRedis")
 
   **
-  ** Open for given directory/config. Redis URI comes from config opts.
-  ** Default: redis://localhost:6379/0
+  ** Open for given directory/config. Redis URI resolution order:
+  **   1. HAXALL_REDIS_URI environment variable
+  **   2. config.opts["redisUri"]
+  **   3. Default: redis://localhost:6379/0
   **
   static HxRedis open(FolioConfig config)
   {
-    redisUri := config.opts["redisUri"] as Uri ?: `redis://localhost:6379/0`
+    // Check env var first, then config opts, then default
+    uriStr := Env.cur.vars["HAXALL_REDIS_URI"]
+    Uri? redisUri
+    if (uriStr != null)
+      redisUri = Uri(uriStr)
+    else
+      redisUri = config.opts?.get("redisUri") as Uri ?: `redis://localhost:6379/0`
     hxRedisLog.debug("Opening HxRedis folio: ${config.name} -> $redisUri")
     return make(config, redisUri)
   }
