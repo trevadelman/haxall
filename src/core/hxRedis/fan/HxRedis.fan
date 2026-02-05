@@ -43,8 +43,10 @@ const class HxRedis : Folio
     Uri? redisUri
     if (uriStr != null)
       redisUri = Uri(uriStr)
+    else if (!config.opts.isEmpty)
+      redisUri = config.opts.get("redisUri") as Uri ?: `redis://localhost:6379/0`
     else
-      redisUri = config.opts?.get("redisUri") as Uri ?: `redis://localhost:6379/0`
+      redisUri = `redis://localhost:6379/0`
     hxRedisLog.debug("Opening HxRedis folio: ${config.name} -> $redisUri")
     return make(config, redisUri)
   }
