@@ -115,8 +115,7 @@ internal class DocMarkdownParser : LinkResolver
       if (node is Heading)
       {
         text := textRend.render(node)
-        echo("TODO: heading $text")
-        //tags = [DocTag.intern(text)]
+        acc.add(DocSummary(DocLink.empty, DocMarkdown(text), [DocTags.heading]))
       }
       else if (node is ListBlock)
       {
@@ -162,18 +161,28 @@ internal class DocMarkdownParser : LinkResolver
 
   override Void resolve(LinkNode linkNode)
   {
-    orig := linkNode.destination
+    // we only process Link nodes, not Image/Video nodes
+    link := linkNode as Link
+    if (link == null) return
+
+    orig := link.destination
     try
     {
-      dest := linker.resolve(orig)
-      if (dest != null)
+      res := linker.resolve(orig)
+      if (res != null)
       {
-        if (compiler.mode.isHtml) dest = DocUtil.htmlUri(linker.uri, dest)
-        linkNode.destination = dest.toStr
+        uri := res.uri
+        if (link.shortcut) link.setText(res.dis)
+        if (compiler.mode.isHtml) uri = DocUtil.htmlUri(linker.uri, uri)
+        link.destination = uri.toStr
       }
       else
       {
-        warn("unresolved link [$orig]")
+        // for now don't report fantom links
+        if (orig.startsWith("fan.")) return
+
+        // warn
+        warn("unresolved link [$orig]", loc(link.loc))
       }
     }
     catch (Err e)
@@ -196,15 +205,15 @@ internal class DocMarkdownParser : LinkResolver
     compiler.err(msg, loc, e)
   }
 
-  private Obj? warn(Str msg)
+  private Obj? warn(Str msg, FileLoc loc := this.loc)
   {
     if (logWarn) compiler.warn(msg, loc)
     return null
   }
 
-  private FileLoc loc()
+  private FileLoc loc(FileLoc? markdownLoc := null)
   {
-    linker.loc
+    linker.loc(markdownLoc)
   }
 
 //////////////////////////////////////////////////////////////////////////

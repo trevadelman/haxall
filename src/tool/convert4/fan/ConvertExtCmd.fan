@@ -22,8 +22,14 @@ internal class ConvertExtCmd : ConvertCmd
   @Opt { help = "Generate lib.xeto" }
   Bool libXeto
 
+  @Opt { help = "Generate types.xeto" }
+  Bool types
+
   @Opt { help = "Generate funcs.xeto" }
   Bool funcs
+
+  @Opt { help = "Convert pod.fandoc to doc.md" }
+  Bool doc
 
   @Opt { help = "Generate everything" }
   Bool all
@@ -57,7 +63,9 @@ internal class ConvertExtCmd : ConvertCmd
       if (!run) return
 
       if (all || libXeto) genLibXeto(ext)
+      if (all || types)   genTypes(ext)
       if (all || funcs)   genFuncs(ext)
+      if (all || doc)     genPodDoc(ext)
     }
     return 0
   }
@@ -117,6 +125,50 @@ internal class ConvertExtCmd : ConvertCmd
     s.add(" }\n")
   }
 
+//////////////////////////////////////////////////////////////////////////
+// Gen Types
+//////////////////////////////////////////////////////////////////////////
+
+  Void genTypes(AExt ext)
+  {
+    if (ext.types.isEmpty) return
+    if (ext.oldName == "conn") return // manually curated
+
+    s := StrBuf()
+    s.add(genHeader)
+    s.add("\n")
+    ext.types.each |t|
+    {
+      genType(s, t)
+    }
+
+    file := ext.xetoSrcDir + `specs.xeto`
+    if (file.exists && !preview) return
+    write("Types", file, s.toStr)
+  }
+
+  static Void genType(StrBuf s, ADefType x)
+  {
+    genDoc(s, x.doc, "")
+    s.add("$x.name: $x.base {\n")
+    keys := x.slots.keys
+    if (x.base.toStr != "Enum") keys = keys.sort
+    keys.each |n, i|
+    {
+      if (i > 0) s.add("\n")
+      genSlot(s, x.slots[n])
+    }
+    s.add("}\n\n")
+  }
+
+  static Void genSlot(StrBuf s, ADefSlot x)
+  {
+    genDoc(s, x.doc, "  ")
+    s.add("  $x.name")
+    if (x.type.toStr != "Marker") s.add(": ").add(x.type)
+    if (!x.meta.isEmpty) { s.add(" "); encodeSpecMeta(s, x.meta) }
+    s.add("\n")
+  }
 
 //////////////////////////////////////////////////////////////////////////
 // Gen Funcs
@@ -145,7 +197,7 @@ internal class ConvertExtCmd : ConvertCmd
   {
     genDoc(s, f.doc, "  ")
     s.add("  $f.name: Func ")
-    encodeFuncMeta(s, f.meta)
+    encodeSpecMeta(s, f.meta)
     s.add("{ ")
     f.eachSlot |p, comma|
     {
@@ -171,7 +223,7 @@ internal class ConvertExtCmd : ConvertCmd
     }
   }
 
-  Void encodeFuncMeta(StrBuf buf, Dict meta)
+  static Void encodeSpecMeta(StrBuf buf, Dict meta)
   {
     if (meta.isEmpty) return
     buf.add("<")
@@ -179,7 +231,7 @@ internal class ConvertExtCmd : ConvertCmd
     buf.add("> ")
   }
 
-  Void encodeDictPairs(StrBuf buf, Dict dict)
+  static Void encodeDictPairs(StrBuf buf, Dict dict)
   {
     first := true
     dict.each |v, n|
@@ -192,7 +244,7 @@ internal class ConvertExtCmd : ConvertCmd
     }
   }
 
-  Void encodeVal(StrBuf buf, Obj v)
+  static Void encodeVal(StrBuf buf, Obj v)
   {
     if (v is Dict)
     {
@@ -200,13 +252,17 @@ internal class ConvertExtCmd : ConvertCmd
       encodeDictPairs(buf, v)
       buf.add("}")
     }
+    else if (v is AType)
+    {
+      buf.add(v.toStr)
+    }
     else
     {
       buf.add(v.toStr.toCode)
     }
   }
 
-  Void genParam(StrBuf buf, AParam p)
+  static Void genParam(StrBuf buf, AParam p)
   {
     buf.add(p.name).add(": ").add(p.type.sig)
     if (!p.meta.isEmpty)
@@ -217,7 +273,7 @@ internal class ConvertExtCmd : ConvertCmd
     }
   }
 
-  Void genDoc(StrBuf s, Str? doc, Str indent)
+  static Void genDoc(StrBuf s, Str? doc, Str indent)
   {
     doc = doc.trimToNull
     if (doc == null) return ""
@@ -225,6 +281,23 @@ internal class ConvertExtCmd : ConvertCmd
     {
       s.add(indent).add(("// " + line).trimEnd).add("\n")
     }
+  }
+
+//////////////////////////////////////////////////////////////////////////
+// Gen Funcs
+//////////////////////////////////////////////////////////////////////////
+
+  Void genPodDoc(AExt ext)
+  {
+    if (ext.pod.dir == null) return
+    fandocFile := ext.pod.dir + `pod.fandoc`
+    if (!fandocFile.exists) return
+
+    base := ext.oldName + "::pod.fandoc"
+    mdFile := ext.xetoSrcDir + `doc.md`
+
+    src := FixFandoc.convertFandocFile(base, fandocFile, fixLinks)
+    write("Doc.md", mdFile, src)
   }
 
 //////////////////////////////////////////////////////////////////////////
@@ -244,32 +317,17 @@ internal class ConvertExtCmd : ConvertCmd
     }
   }
 
-  Str genHeader()
+  private Str genHeader()
   {
-    s := genMacro(ast.config.templateHeader) |n| { null }
-    return s.trim + "\n"
+    ast.config.genHeader
   }
 
-  Str genMacro(Str template, |Str->Str?| resolve)
+  private Str genMacro(Str template, |Str->Str?| resolve)
   {
-    macro := Macro(template)
-    vars := Str:Str[:]
-    macro.vars.each |name|
-    {
-      vars[name] = resolve(name) ?: resolveVarBuiltin(name)
-    }
-    return macro.apply |var| { vars[var] }
+    ast.config.genMacro(template, resolve)
   }
 
-  Str resolveVarBuiltin(Str var)
-  {
-    switch (var)
-    {
-      case "date":    return Date.today.toLocale("D MMM YYYY")
-      case "year":    return Date.today.toLocale("YYYY")
-    }
-    throw Err("Unknown template var: $var")
-  }
+  once FixLinks fixLinks() { FixLinks.load }
 
 //////////////////////////////////////////////////////////////////////////
 // Fields

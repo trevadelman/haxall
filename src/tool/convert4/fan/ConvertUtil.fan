@@ -90,7 +90,7 @@ const class ConvertUtil
       // skip "is"
       if (k == "is") return
 
-      // watch will be handled after we scan all other meta
+      // watch is no longer configurable - rule engine controls when points are put into watch
       if (k == "watch") return
 
       // TODO: handle other Symbols?
@@ -107,18 +107,116 @@ const class ConvertUtil
           input = true
         case "bindTuning":   acc["ruleBindTuning"] = v
         case "bindOut":      acc["ruleBind"] = v
-        // TODO: should this be mapped to 'val' meta instead?
-        case "defVal":       acc["axon"] = v
+        case "defVal":       acc["axon"] = Etc.toAxon(v)
         case "toCurVal":     acc["ruleToCurVal"] = Marker.val
         case "toWriteLevel": acc["ruleToWriteLevel"] = v
         default:             acc[k] = v
       }
     }
 
-    // handle watch for inputs
-    if (input && meta.missing("watch")) acc["ruleNoWatch"] = Marker.val
-
     return Etc.makeDict(acc)
+  }
+
+//////////////////////////////////////////////////////////////////////////
+// Enum (copied from DefUtil)
+//////////////////////////////////////////////////////////////////////////
+
+  ** Parse enum as ordered map of Str:Dict keyed by name.  Dict tags:
+  **   - name: str key
+  **   - doc: fandoc string if available
+  **
+  ** Supported inputs:
+  **   - null returns empty list
+  **   - Dict of Dicts
+  **   - Str[] names
+  **   - Str newline separated names
+  **   - Str comma separated names
+  **   - Str fandoc list as - name: fandoc lines
+  **
+  static Str:Dict parseEnum(Obj? enum)
+  {
+    if (enum == null) return emptyEnum
+
+    if (enum is Dict) return parseEnumDict(enum)
+
+    if (enum is List) return parseEnumList(enum)
+
+    // Xeto allows enum spec ref; for now just support predefined ph enums
+    if (enum is Ref)
+    {
+      switch (enum.toStr)
+      {
+        case "ph::WeatherCondEnum":     return parseEnum("unknown,clear,partlyCloudy,cloudy,showers,rain,thunderstorms,ice,flurries,snow")
+        case "ph::WeatherDaytimeEnum":  return parseEnum("nighttime,daytime")
+        case "ph.points::RunEnum":      return parseEnum("off,on")
+        case "ph.points::OccupiedEnum": return parseEnum("unoccupied occupied")
+      }
+      echo("WARN: xeto enum refs not supported yet: $enum")
+      return emptyEnum
+    }
+
+    enumStr := enum.toStr.trimStart
+    if (enumStr.startsWith("-")) return parseEnumFandoc(enumStr)
+    return parseEnumSplit(enumStr)
+  }
+
+  private static const Str:Dict emptyEnum := Str:Dict[:]
+
+  private static Str:Dict parseEnumDict(Dict dict)
+  {
+    if (dict.isEmpty) return emptyEnum
+    acc := Str:Dict[:] { ordered = true }
+    dict.each |meta, key| { acc.add(key, Etc.dictSet(meta, "name", key)) }
+    return acc
+  }
+
+  private static Str:Dict parseEnumList(Str[] list)
+  {
+    if (list.isEmpty) return emptyEnum
+    acc := Str:Dict[:] { ordered = true }
+    list.each |key| { acc.add(key, Etc.dict1("name", key)) }
+    return acc
+  }
+
+  private static Str:Dict parseEnumFandoc(Str enum)
+  {
+    acc := Str:Dict[:] { ordered = true }
+    key := ""
+    doc := ""
+    enum.splitLines.each |line|
+    {
+      line = line.trim
+      if (line.isEmpty) return
+      if (line.startsWith("-"))
+      {
+        colon := line.index(":")
+        if (colon == null) throw Err("Expecting '-key: doc', not: $line")
+        key = line[1..<colon].trim
+        doc = line[colon+1..-1].trim
+      }
+      else
+      {
+        doc = doc + "\n" + line
+      }
+      acc[key] = Etc.dict2("name", key, "doc", doc)
+    }
+    return acc
+  }
+
+  private static Str:Dict parseEnumSplit(Str enum)
+  {
+    acc := Str:Dict[:] { ordered = true }
+    keys := enum.splitLines
+    if (keys.size == 1) keys = enum.split(',')
+    keys.each |key| { acc.add(key, Etc.dict1("name", key)) }
+    return acc
+  }
+
+  private static Str[] parseEnumSplitNames(Str enum)
+  {
+    keys := enum.splitLines
+    if (keys.size == 1) keys = enum.split(',')
+    return keys
   }
 }
 

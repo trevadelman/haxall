@@ -56,11 +56,15 @@ class FixDocs : ConvertCmd
 
   Void fixFile(File f)
   {
+    if (f.name == "lib.xeto") return
+
     if (f.isDir)
     {
       f.list.each |kid| { fixFile(kid) }
       return
     }
+
+    curBase = f.parent.name + "::" + f.name
 
     if (f.ext == "xeto") return fixXeto(f)
   }
@@ -74,7 +78,7 @@ class FixDocs : ConvertCmd
     }
     else
     {
-      //echo("TOOD: rewrite $f")
+      f.out.printLine(lines.join("\n")).close
     }
   }
 
@@ -95,7 +99,7 @@ class FixDocs : ConvertCmd
       // look for // comment
       line := oldLines[i]
       ss := line.index("//")
-      if (ss == null)
+      if (ss == null || (ss > 2 && line[ss-1] == ':'))
       {
         header = false
         newLines.add(line)
@@ -110,6 +114,7 @@ class FixDocs : ConvertCmd
       this.curLoc = FileLoc(f.osPath, i+1)
       if (!line.trimStart.startsWith("//"))
       {
+        // fix // comment
         comment := slashSlashComment(line, ss)
         newLine := line[0..<ss] + "// " + fixSlashSlashDoc([comment]).first
         newLines.add(newLine)
@@ -127,7 +132,10 @@ class FixDocs : ConvertCmd
       }
       fixSlashSlashDoc(block).each |newLine|
       {
-        newLines.add(prefix + " " + newLine)
+        if (newLine.all |ch| { ch == '/' })
+          newLines.add(prefix + newLine)
+        else
+          newLines.add(prefix + " " + newLine)
       }
     }
 
@@ -147,13 +155,16 @@ class FixDocs : ConvertCmd
   Str[] fixSlashSlashDoc(Str[] lines)
   {
     // fix line-by-line to maintain original formatting
-    FixFandoc(curLoc, lines).fix
+    FixFandoc(curBase, curLoc, lines, fixLinks).fix
   }
+
+  once FixLinks fixLinks() { FixLinks.load }
 
 //////////////////////////////////////////////////////////////////////////
 // Fields
 //////////////////////////////////////////////////////////////////////////
 
+  Str? curBase
   FileLoc curLoc := FileLoc.unknown
 }
 

@@ -253,6 +253,7 @@ internal class GenPages: Step
     acc.ordered = true
     slots.each |slot|
     {
+      if (DocUtil.isSpecNoDoc(slot)) return
       d := genSlot(spec, slot)
       name := slot.name
       if (XetoUtil.isAutoName(name)) name = compiler.autoName(autoNameCount++)
@@ -317,7 +318,7 @@ internal class GenPages: Step
     name  := uri.basename
     qname := lib.name + "::" + name
     doc   := docns.chapters(lib).get(name)
-    page  := DocChapter(libRef, qname, genDoc(markdown, doc), null, null)
+    page  := DocChapter(libRef, qname, doc.title, genDoc(markdown, doc), null, null)
     return addPage(page, page.doc,  null)
   }
 
@@ -329,7 +330,10 @@ internal class GenPages: Step
       if (chapter == null) return
 
       prev := i == 0 ? null : order[i-1]
+      if (prev != null && prev.isHeading) prev = i-2 >= 0 ? order[i-2] : null
+
       next := order.getSafe(i+1)
+      if (next != null && next.isHeading) next = order.getSafe(i+2)
 
       if (prev != null) DocChapter#prev->setConst(chapter, prev.link)
       if (next != null) DocChapter#next->setConst(chapter, next.link)

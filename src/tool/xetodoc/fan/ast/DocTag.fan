@@ -79,6 +79,32 @@ const class DocTag
 
   ** Icon to use for this tag
   Str icon() { DocUtil.tagToIcon(name) }
+
+  ** CSS color string or null for default
+  Str? color()
+  {
+    switch (name)
+    {
+      // axon funcs - orange
+      case "axon":
+      case "slot":
+        return "#ff8c00"
+
+      // tags - brown
+      case "tag":
+      case "conjunct":
+        return "#8a7e5f"
+
+      // fantom - purple
+      case "fantom":
+        return "#9b59b6"
+
+      // forum post - red
+      case "forum":
+        return "#d0021b"
+    }
+    return null
+  }
 }
 
 **************************************************************************
@@ -98,6 +124,7 @@ const class DocTags
   static const DocTag chapter  := DocTag("chapter")
   static const DocTag sys      := DocTag("sys")
   static const DocTag ph       := DocTag("ph")
+  static const DocTag heading  := DocTag("heading")
 
   static SpecFlavor? toFlavor(DocTag? tag)
   {

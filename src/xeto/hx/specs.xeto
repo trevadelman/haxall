@@ -12,3 +12,13 @@ Ext: Interface <abstract>
 // System level extension
 SysExt: Ext <abstract>
 
+// Secret string managed in password store
+Password: Scalar
+
+// Entity
++Entity {
+  // Last modified time of record -
+  // see [details](hx.doc.haxall::Folio#concurrency-control).
+  mod: DateTime
+}
+

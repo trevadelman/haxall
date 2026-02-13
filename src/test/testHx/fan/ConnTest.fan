@@ -29,13 +29,15 @@ class ConnTest : HxTest
   {
     addExt("hx.conn")
 
-    verifyModel("hx.haystack",  "haystack", "lcwhx")
-    verifyModel("hx.modbus",    "modbus",   "lcw")
-    verifyModel("hx.mqtt",      "mqtt",     "")
-    verifyModel("hx.test.conn", "connTest", "lcwh")
+    h := verifyModel("hx.haystack",  "haystack", "lcwhx", 1sec)
+    m := verifyModel("hx.modbus",    "modbus",   "lcw",   null)
+    q := verifyModel("hx.mqtt",      "mqtt",     "",      null)
+    t := verifyModel("hx.test.conn", "connTest", "lcwh",  33sec)
+
+    verifyEq(t.pollFreqDefault, 33sec)
   }
 
-  Void verifyModel(Str extName, Str prefix, Str flags)
+  ConnModel verifyModel(Str extName, Str prefix, Str flags, Duration? pollFreq)
   {
     ext := (ConnExt)addExt(extName)
     ext.spi.sync
@@ -49,8 +51,17 @@ class ConnTest : HxTest
     verifyEq(m.hasCur,      flags.contains("c"), "$prefix cur")
     verifyEq(m.hasWrite,    flags.contains("w"), "$prefix write")
     verifyEq(m.hasHis,      flags.contains("h"), "$prefix his")
+    verifyEq(m.pollFreqDefault, pollFreq)
+
+    if (m.hasCur)
+    {
+      verifyEq(m.curTag, "${prefix}Cur")
+      verifyEq(m.curTagType, Str#)
+    }
 
     verifyEq(m.writeLevelTag !== null, flags.contains("x"), "$prefix writeLevel")
+
+    return m
   }
 
 //////////////////////////////////////////////////////////////////////////
@@ -93,7 +104,7 @@ class ConnTest : HxTest
       [p1, p2, p3])
 
     // remove points
-    p2 = commit(p2, ["point":Remove.val])
+    p2 = commit(p2, ["point":None.val])
     commit(p3, null, Diff.remove)
     verifyService(
       ["hx.haystack"],
@@ -461,7 +472,7 @@ class ConnTest : HxTest
     p4aOld := conn4.point(p4a.id)
     p4bOld := conn4.point(p4b.id)
     conn4.trace.clear
-    p4a = commit(p4a, ["point":Remove.val])
+    p4a = commit(p4a, ["point":None.val])
     p4b = commit(p4b, ["trash":m])
     proj.sync
     verifyRoster(lib,
@@ -480,7 +491,7 @@ class ConnTest : HxTest
     // add them back
     conn4.trace.clear
     p4a = commit(p4a, ["point":m])
-    p4b = commit(p4b, ["trash":Remove.val])
+    p4b = commit(p4b, ["trash":None.val])
     proj.sync
     verifyRoster(lib,
       [
@@ -500,7 +511,7 @@ class ConnTest : HxTest
     c3Old := lib.conn(c2.id)
     verifyEq(c2Old.isAlive, true)
     verifyEq(c3Old.isAlive, true)
-    c2 = commit(c2, ["haystackConn":Remove.val])
+    c2 = commit(c2, ["haystackConn":None.val])
     c3 = commit(c3, ["trash":m])
     proj.sync
     verifyErr(UnknownConnErr#) { lib.conn(c2.id) }
@@ -515,7 +526,7 @@ class ConnTest : HxTest
 
     // add back c2 and c3
     c2 = commit(c2, ["haystackConn":m])
-    c3 = commit(c3, ["trash":Remove.val])
+    c3 = commit(c3, ["trash":None.val])
     proj.sync
     verifyRoster(lib,
       [
@@ -544,7 +555,7 @@ class ConnTest : HxTest
     verifyWatched(conn4, [p4a, p4b])
 
     // now change isCurEnabled and check watch updates
-    p4b = commit(p4b, ["haystackCur":Remove.val])
+    p4b = commit(p4b, ["haystackCur":None.val])
     verifyWatched(conn4, [p4a, p4b], [p4a])
     p4a = commit(p4a, ["haystackCur":n(123)])
     p4b = commit(p4b, ["haystackCur":"back"])
@@ -751,7 +762,7 @@ class ConnTest : HxTest
 
   Void verifyPtFault(ConnPoint p, Str tag, Obj? val, Str msg)
   {
-    rec := commit(readById(p.id), [tag: val ?: Remove.val])
+    rec := commit(readById(p.id), [tag: val ?: None.val])
     proj.sync
     p.conn.sync
     //echo("-- $tag = $val $p.fault")
@@ -846,7 +857,7 @@ class ConnTest : HxTest
       ])
 
     // remove connTuningRef on point
-    p1 = commit(p1, ["connTuningRef":Remove.val])
+    p1 = commit(p1, ["connTuningRef":None.val])
     c1b = verifyBuckets(c1, c1b, [
       ["TY",  7sec, p1],
       ["TX", 30sec, p4],
@@ -875,7 +886,7 @@ class ConnTest : HxTest
       ])
 
     // remove connTuningRef on conn
-    c1rec = commit(c1rec, ["connTuningRef":Remove.val])
+    c1rec = commit(c1rec, ["connTuningRef":None.val])
     c1b = verifyBuckets(c1, c1b, [
       ["$name-default", 10sec, p1, p5],
       ["TX",            30sec, p4],
@@ -956,7 +967,7 @@ class ConnTest : HxTest
 
     // disabled/enable transitions
     c1rec = commit(c1rec, ["disabled":m])
-    c2rec = commit(c2rec, ["disabled":Remove.val])
+    c2rec = commit(c2rec, ["disabled":None.val])
     verifyConnStatus(c1, "disabled", "closed")
     verifyConnStatus(c2, "unknown", "closed")
 
@@ -985,7 +996,7 @@ class ConnTest : HxTest
     verifyPointStatus(p10, "fault")
 
     // disable/enable conn transition again with points
-    c1rec = commit(c1rec, ["disabled":Remove.val])
+    c1rec = commit(c1rec, ["disabled":None.val])
     c2rec = commit(c2rec, ["disabled":m])
     verifyConnStatus(c1, "unknown", "closed")
     verifyConnStatus(c2, "disabled", "closed")
@@ -1002,13 +1013,13 @@ class ConnTest : HxTest
 
     // disable/enable points
     p1 = commit(p1, ["disabled":m])
-    p2 = commit(p2, ["disabled":Remove.val])
+    p2 = commit(p2, ["disabled":None.val])
     verifyPointStatus(p1, "disabled")
     verifyPointStatus(p2, "unknown")
 
     // update fault condition
-    p1 = commit(p1, ["kind":Remove.val])
-    p2 = commit(p2, ["kind":Remove.val])
+    p1 = commit(p1, ["kind":None.val])
+    p2 = commit(p2, ["kind":None.val])
     verifyPointStatus(p1, "fault")
     verifyPointStatus(p2, "fault")
 

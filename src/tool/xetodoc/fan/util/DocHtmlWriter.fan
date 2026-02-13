@@ -33,6 +33,7 @@ class DocHtmlWriter : WebOutStream
       case DocPageType.chapter:  chapter(p)
       case DocPageType.lib:      lib(p)
       case DocPageType.index:    index(p)
+      case DocPageType.search:   search(p)
       default:                   throw Err(p.pageType.toStr)
     }
     pageEnd(p)
@@ -81,16 +82,63 @@ class DocHtmlWriter : WebOutStream
     // chapter title
     nl.h1.esc(p.title).h1End.nl
 
-    // prev/next navigation
-    tag(tagNav).nl
-    ul
-    if (p.prev != null) li("class='prev'").link(p.prev, "\u00ab $p.prev.dis").liEnd; else li.w("&nbsp;").liEnd
-    if (p.next != null) li("class='next'").link(p.next, "$p.next.dis \u00bb").liEnd
-    ulEnd
-    tagEnd(tagNav).nl.nl
+    // prev/next navigation (only if multiple chapters)
+    if (p.prev != null || p.next != null)
+    {
+      tag(tagNav).nl
+      ul
+      if (p.prev != null) li("class='prev'").link(p.prev, "\u00ab $p.prev.dis").liEnd; else li.w("&nbsp;").liEnd
+      if (p.next != null) li("class='next'").link(p.next, "$p.next.dis \u00bb").liEnd
+      ulEnd
+      tagEnd(tagNav).nl.nl
+    }
 
     // body
     markdown(p.doc)
+  }
+
+  private Void search(DocSearch p)
+  {
+    form("method='get' action='/doc/search'")
+     .p
+     .input("type='text' name='q' value='$p.pattern.toXml' placeholder='Search docs...'")
+     .pEnd
+     .formEnd
+     .nl
+
+    // number of hits info
+    tag(tagSearchInfo).nl
+    esc(p.info).nl
+    tagEnd(tagSearchInfo).nl.nl
+
+    // hits
+    tag(tagSearchHits)
+    p.hits.each |hit|
+    {
+      tag(tagSearchHit).nl
+      h3
+        docTags(hit.tags)
+        link(hit.link)
+      h3End
+      markdown(hit.text)
+      tagEnd(tagSearchHit).nl.nl
+    }
+    tagEnd(tagSearchHits)
+  }
+
+  private Void docTags(DocTag[] tags)
+  {
+    tags.each |tag| { docTag(tag) }
+  }
+
+  private Void docTag(DocTag x)
+  {
+    Str? attrs := null
+    tagColor := x.color
+    if (tagColor != null) attrs = "style='background-color: $tagColor;'"
+    tag(tagTag, attrs)
+    esc(x.name)
+    tagEnd(tagTag)
   }
 
 //////////////////////////////////////////////////////////////////////////
@@ -249,10 +297,10 @@ class DocHtmlWriter : WebOutStream
     tag(tagPage).nl.nl
 
     // <xetodoc-nav>
-    pageNav(p).nl.nl
+    if (p.pageType.includeNav) pageNav(p).nl.nl
 
     // <xetodoc-main>
-    tag(pageMainTag(p)).nl
+    if (p.pageType.useMainLayout) tag(pageMainTag(p)).nl
   }
 
   private This pageNav(DocPage p)
@@ -284,12 +332,17 @@ class DocHtmlWriter : WebOutStream
   private Void pageEnd(DocPage p)
   {
     // footer
-    tabSection("", "doc-footer")
-    tag(tagFooter).esc(footerText).tagEnd(tagFooter)
-    tabSectionEnd
+    if (p.pageType.includeFooter)
+    {
+      tabSection("", "doc-footer")
+      tag(tagFooter).esc(footerText).tagEnd(tagFooter)
+      tabSectionEnd
+    }
 
-    // </xetodoc-main> </xetodoc-page>
-    tagEnd(pageMainTag(p)).nl
+    // </xetodoc-main>
+    if (p.pageType.useMainLayout) tagEnd(pageMainTag(p)).nl
+
+    // </xetodoc-page>
     tagEnd(tagPage).nl
 
     // </body> </html>
@@ -330,7 +383,13 @@ class DocHtmlWriter : WebOutStream
 
     tabSection(title)
     props
-    summaries.each |s| { prop(s.link, s.text) }
+    summaries.each |s|
+    {
+      if (s.isHeading)
+        propHeading(s.text.html)
+      else
+        prop(s.link, s.text)
+    }
     propsEnd
     tabSectionEnd
 
@@ -368,6 +427,14 @@ class DocHtmlWriter : WebOutStream
       .tag(tagPropTd).propVal(val).tagEnd(tagPropTd)
       .tagEnd(tagProp).nl
     return this
+  }
+
+  private This propHeading(Str title)
+  {
+    tr
+    .tag(tagPropHeading, "colspan='2'").esc(title)
+    .tagEnd(tagPropHeading)
+    .trEnd
   }
 
   private This propName(Obj name)
@@ -503,19 +570,24 @@ class DocHtmlWriter : WebOutStream
 // Fields
 //////////////////////////////////////////////////////////////////////////
 
-  static const Str tagPage       := "xetodoc-page"
-  static const Str tagNav        := "xetodoc-nav"
-  static const Str tagMain       := "xetodoc-main" // two column tab+section
-  static const Str tagTab        := "xetodoc-tab"
-  static const Str tagSection    := "xetodoc-section"
-  static const Str tagProps      := "xetodoc-prop-table"
-  static const Str tagProp       := "xetodoc-prop-tr"
-  static const Str tagPropTh     := "xetodoc-prop-th"
-  static const Str tagPropTd     := "xetodoc-prop-td"
-  static const Str tagSlot       := "xetodoc-slot"
-  static const Str tagSlotNested := "xetodoc-slot-nested"
-  static const Str tagChapter    := "xetodoc-chapter"
-  static const Str tagFooter     := "xetodoc-footer"
+  static const Str tagPage        := "xetodoc-page"
+  static const Str tagNav         := "xetodoc-nav"
+  static const Str tagMain        := "xetodoc-main" // two column tab+section
+  static const Str tagTab         := "xetodoc-tab"
+  static const Str tagSection     := "xetodoc-section"
+  static const Str tagProps       := "xetodoc-prop-table"
+  static const Str tagProp        := "xetodoc-prop-tr"
+  static const Str tagPropTh      := "xetodoc-prop-th"
+  static const Str tagPropTd      := "xetodoc-prop-td"
+  static const Str tagPropHeading := "xetodoc-prop-heading"
+  static const Str tagSlot        := "xetodoc-slot"
+  static const Str tagSlotNested  := "xetodoc-slot-nested"
+  static const Str tagChapter     := "xetodoc-chapter"
+  static const Str tagFooter      := "xetodoc-footer"
+  static const Str tagSearchInfo  := "xetodoc-search-info"
+  static const Str tagSearchHits  := "xetodoc-search-hits"
+  static const Str tagSearchHit   := "xetodoc-search-hit"
+  static const Str tagTag         := "xetodoc-tag"
 
   Bool fullHtml := true
   Str footerText := "footer"

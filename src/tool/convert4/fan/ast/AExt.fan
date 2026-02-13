@@ -38,15 +38,28 @@ class AExt
     libFile.parent.list.each |file|
     {
       if (file.ext == "trio")
-        TrioReader(file.in).readAllDicts.each |x| { ext.defs.add(x) }
+        TrioReader(file.in).readAllDicts.each |x| { ext.addDef(x) }
     }
 
     AFunc.scanExt(ast, ext)
+    ADefType.scanExt(ast, ext)
+
+    if (pod.name == "???")
+    {
+      ext.defs.each |d, i|
+      {
+        if (ext.used[i]) return
+        name := d["def"]?.toStr ?: d["defx"]?.toStr
+        if (d.has("view") || name.startsWith("lib:") || name.startsWith("command:")) return
+        echo("--- WARN: not used $name")
+        //Etc.dictDump(d)
+      }
+    }
   }
 
-  static Str oldNameToLibName(Ast ast, Str oldName)
+  static Str oldNameToLibName(Ast? ast, Str oldName)
   {
-    prefix  := ast.config.libPrefix
+    prefix  := ast == null ? "hx" : ast.config.libPrefix
     if (oldName == "axon") return "axon"
     if (oldName.endsWith("Auth")) return prefix + ".auth." + oldName[0..-5].lower
     if (prefix == oldName) return oldName
@@ -80,7 +93,17 @@ class AExt
 
   Bool hasExt() { specName != null }
 
-  Dict[] defs := [,]
+  Dict[] defs() { defsRef.ro }
+  Bool[] used := Bool[,]
+  private Dict[] defsRef := Dict[,]
+
+  Void addDef(Dict d)
+  {
+    defsRef.add(d)
+    used.add(false)
+  }
+
+  ADefType[] types := [,]
 
   Str? fantomFuncType
   AFunc[] funcs := [,]

@@ -103,6 +103,7 @@ const class SpecBindings
     add(LinkBinding               (xeto.type("Link")))
     add(LinksBinding              (xeto.type("Links")))
     add(MarkerBinding             (xeto.type("Marker")))
+    add(NoneBinding               (xeto.type("None")))
     add(RefBinding                (xeto.type("Ref")))
     add(SpecDictBinding           (xeto.type("Spec")))
     add(UnitQuantityBinding       (xeto.type("UnitQuantity")))
@@ -110,7 +111,6 @@ const class SpecBindings
     // haystack pod
     add(CoordBinding     (hay.type("Coord")))
     add(FilterBinding    (hay.type("Filter")))
-    add(NoneBinding      (hay.type("Remove")))
     add(NABinding        (hay.type("NA")))
     add(NumberBinding    (hay.type("Number")))
     add(SpanBinding      (hay.type("Span")))
@@ -127,6 +127,15 @@ const class SpecBindings
 
   ** Map pod name to lib name (we do not handle multiple lib bindings)
   Str? podToLib(Str podName)  { podToLibs.get(podName) }
+
+  ** Map lib  name to pod name
+  Str? libToPod(Str libName)
+  {
+    x := loaders[libName] as Str
+    if (x == null) return x
+    if (x.contains("::")) return XetoUtil.qnameToLib(x)
+    return x
+  }
 
   ** List all bindings installed
   SpecBinding[] list()
@@ -528,7 +537,7 @@ internal const class NABinding : SingletonBinding
 @Js
 internal const class NoneBinding : SingletonBinding
 {
-  new make(Type type) : super("sys::None", type, Remove.val, "none") {}
+  new make(Type type) : super("sys::None", type, None.val) {}
 }
 
 @Js

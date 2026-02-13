@@ -19,12 +19,16 @@ class AFunc
   static Void scanExt(Ast ast, AExt ext)
   {
     // look for trio files
-    ext.defs.each |def|
+    ext.defs.each |def, i|
     {
       try
-        scanDef(ast, ext, def)
-      catch (Err e)
-        Console.cur.err("Cannot scan def: $ext.oldName $def", e)
+      {
+        f := scanDef(ast, ext, def)
+        if (f == null) return
+        ext.funcs.add(f)
+        ext.used[i] = true
+      }
+      catch (Err e) Console.cur.err("Cannot scan def: $ext.oldName $def", e)
     }
 
     // look for Fantom class
@@ -47,7 +51,7 @@ class AFunc
 // Defs
 //////////////////////////////////////////////////////////////////////////
 
-  static Void scanDef(Ast ast, AExt ext, Dict def)
+  static AFunc? scanDef(Ast ast, AExt ext, Dict def)
   {
     Str? name
     if (def.has("func"))
@@ -61,7 +65,7 @@ class AFunc
       if (symbol != null && symbol.startsWith("func:"))
         name  = symbol[5..-1]
     }
-    if (name == null) return
+    if (name == null) return null
 
     doc := def["doc"] as Str ?: ""
     src := def["src"] as Str ?: throw Err("Missing axon src")
@@ -71,8 +75,7 @@ class AFunc
 
     meta := Etc.dictFromMap(mapMeta(ast, def))
 
-    func := make(name, doc, meta, sig.aparams, returns, sig.body)
-    ext.funcs.add(func)
+    return make(name, doc, meta, sig.aparams, returns, sig.body)
   }
 
 //////////////////////////////////////////////////////////////////////////
@@ -124,7 +127,7 @@ class AFunc
     // returns
     returnType := method.returns
     if (returnType.name == "Void") returnType = Obj?#
-    returns := AParam("returns", AType.map(returnType))
+    returns := AParam("returns", AType.fromFantom(returnType))
 
     // function stub
     return AFunc(name, doc, Etc.makeDict(meta), params, returns, null)
@@ -139,10 +142,28 @@ class AFunc
     ast.config.funcMeta.contains(n) || ast.config.ns.metas.has(n)
   }
 
+  ** true if this tag belongs in the ruleReady config dict
+  static Bool isRuleReady(Str n)
+  {
+    switch (n)
+    {
+      case "dis":
+      case "help":
+      case "ruleOn":
+      case "sparkRule":
+      case "kpiRule":
+      case "curRule":
+        return true
+      default:
+        return false
+    }
+  }
+
   static Str:Obj mapMeta(Ast ast, Dict orig)
   {
     meta := Str:Obj[:]
     defMeta := Str:Obj[:]
+    ruleReady := Str:Obj[:]
 
     orig.each |v, n|
     {
@@ -160,13 +181,32 @@ class AFunc
       if (n == "src")  return
       if (n == "hisFuncReady") return
 
-      // if its defined in axon/config; otherwise stuff into defMeta
-      if (isFuncMeta(ast, n))
+
+      if (isRuleReady(n))
+      {
+        // if this is special rule ready tag put in ruleReady Dict
+        ruleReady[n] = v
+      }
+      else if (isFuncMeta(ast, n))
+      {
+        // if its defined in axon/config
         meta[n] = v
+      }
       else
+      {
+        // otherwise stuff into defMeta
         defMeta[n] = v
+      }
     }
 
+    if (!ruleReady.isEmpty)
+    {
+      // must ast least have one of these tags
+      if (ruleReady.containsKey("sparkRule") || ruleReady.containsKey("kpiRule") || ruleReady.containsKey("curRule"))
+        meta["ruleReady"] = Etc.dictFromMap(ruleReady)
+      else
+        defMeta.addAll(ruleReady)
+    }
     if (!defMeta.isEmpty) meta["defMeta"] = Etc.dictFromMap(defMeta)
 
     return meta
@@ -237,7 +277,7 @@ class AFunc
       else echo("WARN: unhandled lazy param: $method $name")
     }
 
-    return AParam(name, AType.map(type), Etc.dict0)
+    return AParam(name, AType.fromFantom(type), Etc.dict0)
   }
 
 //////////////////////////////////////////////////////////////////////////
@@ -305,48 +345,5 @@ const class AParam
   const Dict meta
 
   override Str toStr() { "$name: $type" }
-}
-
-**************************************************************************
-** AType
-**************************************************************************
-
-const class AType
-{
-  static const AType obj := AType("sys::Obj?")
-
-  static AType map(Type type)
-  {
-    // specials
-    sig := mapSpecial(type.qname) ?: type.name
-    if (type.isNullable) sig = sig + "?"
-    return make(sig)
-  }
-
-  static Str? mapSpecial(Str qname)
-  {
-    switch(qname)
-    {
-      case "axon::Fn":           return "sys::Func"
-      case "haystack::Col":      return "sys::Obj"
-      case "haystack::Row":      return "sys::Obj"
-      case "haystack::Coord":    return "sys::Obj"
-      case "haystack::DateSpan": return "sys::Obj"
-      case "haystack::Symbol":   return "sys::Obj"
-      case "haystack::Remove":   return "sys::Obj"
-      case "haystack::Def":      return "sys::Obj"
-      case "folio::Diff":        return "sys::Obj"
-      case "axon::MStream":      return "sys::Obj"
-      case "math::Matrix":       return "sys::Grid"
-    }
-    if (qname.startsWith("mlExt::")) return "sys::Obj"
-    return null
-  }
-
-  new make(Str sig) { this.sig = sig }
-
-  const Str sig
-
-  override Str toStr() { sig }
 }
 

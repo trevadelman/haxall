@@ -18,12 +18,51 @@ using fandoc::Link
 **
 class FixFandoc
 {
-
-  new make(FileLoc loc, Str[] lines)
+  static Str convertFandocFile(Str base, File fandocFile, FixLinks? fixLinks)
   {
-    this.loc   = loc
-    this.lines = lines
-    this.types = FandocParser().parseLineTypes(lines)
+    oldLines := fandocFile.readAllLines
+
+    comment := Str[,]
+    while (oldLines.first.startsWith("**"))
+    {
+      line := oldLines.removeAt(0).trimStart
+      while (!line.isEmpty && line[0] == '*') line = line[1..-1]
+      line = line.trim
+      if (!line.isEmpty) comment.add(line)
+    }
+
+    newLines := make(base, FileLoc(fandocFile), oldLines, fixLinks).fix
+
+    vimeoLine := comment.find |line| { line.startsWith("vimeo") }
+    if (vimeoLine != null)
+    {
+      // create line to show vimeo video
+      id := vimeoLine.split(':').last
+      if (id.contains("/")) id = id.split('/').last
+      videoLink := "![Video](video://vimeo/${id})"
+
+      // find heading
+      idx := newLines.findIndex { it.startsWith("#") } ?: 1
+      newLines.insertAll(idx, [videoLink, ""])
+    }
+
+    if (!comment.isEmpty)
+    {
+      comment.insert(0, "<!--")
+      comment.add("-->")
+      newLines.insertAll(0, comment)
+    }
+
+    return newLines.join("\n")
+  }
+
+  new make(Str base, FileLoc loc, Str[] lines, FixLinks? fixLinks)
+  {
+    this.base     = base
+    this.loc      = loc
+    this.lines    = lines
+    this.types    = FandocParser().parseLineTypes(lines)
+    this.fixLinks = fixLinks
   }
 
   Str[] fix()
@@ -31,6 +70,7 @@ class FixFandoc
     acc := Str[,]
     acc.capacity = lines.size
 
+    lastCodeIndent := false
     for (i := 0; i<lines.size; ++i)
     {
       linei = i
@@ -46,11 +86,21 @@ class FixFandoc
       }
       else
       {
-        acc.add(fixLine(line, type))
+        // ensure code indentation is preceded/followed by blank line
+        newLine := fixLine(line, type)
+        newIsCodeIndent := mode == FixFandocMode.preIndent
+        if (newIsCodeIndent && !isBlank(acc.last) && !lastCodeIndent) acc.add("")
+        if (lastCodeIndent && !newIsCodeIndent && !isBlank(newLine)) acc.add("")
+        lastCodeIndent = newIsCodeIndent
+
+        acc.add(newLine)
       }
     }
+
     return acc
   }
+
+  private Bool isBlank(Str? line) { line?.trimToNull == null }
 
 //////////////////////////////////////////////////////////////////////////
 // Block Lines
@@ -96,7 +146,7 @@ class FixFandoc
       case LineType.hr:         return line
       case LineType.preStart:   return fixPreStart
       case LineType.normal:     return fixNorm(line, curIndent)
-      default:                  throw Err(type.name)
+      default:                  throw Err("$type.name: $line")
     }
   }
 
@@ -160,7 +210,9 @@ class FixFandoc
     try
     {
       buf := StrBuf(line.size)
-      doc := FandocParser().parse(loc.toStr, line.in)
+      parser := FandocParser()
+      parser.parseHeader = false
+      doc := parser.parse(loc.toStr, line.in)
       fixNode(doc, buf)
       return buf.toStr
     }
@@ -175,6 +227,8 @@ class FixFandoc
   {
     switch (n.id)
     {
+      case DocNodeId.doc:      fixElem(n, buf)
+
       case DocNodeId.text:     buf.add(n.toText)
 
       case DocNodeId.emphasis: fixElem(n, buf, "*")
@@ -184,8 +238,11 @@ class FixFandoc
       case DocNodeId.link:     fixLink(n, buf)
       case DocNodeId.image:    fixImage(n, buf)
 
-      case DocNodeId.para:     fixElem(n, buf)
-      case DocNodeId.doc:      fixElem(n, buf)
+      case DocNodeId.para:
+        a := ((Para)n).admonition
+        if (a != null) buf.add(a).add(": ") // this will occur on lines starting with TODO:
+        fixElem(n, buf)
+
       default: throw Err("TODO: $n.id $n")
     }
   }
@@ -201,7 +258,10 @@ class FixFandoc
   {
     text := n.toText
     uri := n.uri
-    if (text == uri)
+
+    if (fixLinks != null) uri = fixLinks.fix(base, uri)
+
+    if (text == n.uri)
       buf.add("[").add(uri).add("]")
     else
       buf.add("[").add(text).add("](").add(uri).add(")")
@@ -229,12 +289,14 @@ class FixFandoc
 // Fields
 //////////////////////////////////////////////////////////////////////////
 
+  private Str base
   private FileLoc loc
   private Str[] lines
   private LineType[] types
   private Int linei
   private FixFandocMode mode := FixFandocMode.norm
   private Int modeIndent
+  private FixLinks? fixLinks
 }
 
 **************************************************************************

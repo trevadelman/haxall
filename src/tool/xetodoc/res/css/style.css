@@ -169,6 +169,18 @@ xetodoc-prop-td p {
   margin: 0;
 }
 
+xetodoc-prop-heading {
+  display: table-cell;
+  font-weight: bold;
+  font-size: 130%;
+  text-align: left;
+  vertical-align: text-top;
+  padding: 30px 0 4px 0;
+  white-space: nowrap;
+  color: var(--title-color);
+}
+
+
 /***************************************************************
  * Slot Details
  **************************************************************/
@@ -210,5 +222,76 @@ xetodoc-chapter {
 xetodoc-chapter h1:not(:first-child) {
   color: var(--name-color);
   font-size: 1.5em;
+}
+
+xetodoc-chapter h2 {
+  color: var(--name-color);
+  font-size: 1.3em;
+}
+
+xetodoc-chapter h3 {
+  color: var(--name-color);
+  font-size: 1.1em;
+}
+
+/*************************************************************************
+ * Search
+ ************************************************************************/
+
+xetodoc-page form input[type=text] {
+  width: 600px;
+  border: 1px solid #bbb;
+  border-radius: 2px;
+  margin: 0;
+  padding: 6px;
+  font-size: 16px;
+}
+
+xetodoc-search-info {
+  padding: 10px 0 0 0;
+  font-size: 12px;
+  font-weight: bold;
+  color: #aaa;
+}
+
+xetodoc-search-hits {
+  display: block;
+  margin: 0;
+  padding: 0;
+}
+
+xetodoc-search-hit {
+  display: block;
+  margin-top: 20px;
+}
+
+xetodoc-search-hit h3 {
+  padding: 0 0 4px 0;
+  margin: 0;
+}
+
+xetodoc-search-hit a {
+  color: var(--name-color);
+  padding: 2px;
+  text-decoration: none;
+}
+
+xetodoc-search-hit a:hover {
+  text-decoration: underline;
+}
+
+xetodoc-search-hit p {
+  margin: 0;
+  padding: 0;
+}
+
+xetodoc-tag  {
+  padding: 2px 8px;
+  font-size: 75%;
+  color: #fff;
+  background: var(--name-color);
+  margin-right: 10px;
+  border: 0px solid #bbb;
+  border-radius: 10px;
 }
 
