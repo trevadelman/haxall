@@ -12,6 +12,13 @@ xeto.props
 # lib/
 /lib/
 
+# Rust build artifacts
+/src/core/rustFolio/rust/target/
+
+# runtime data
+/crypto/
+/db/
+
 # doc/
 /doc/
 /doc-*/
