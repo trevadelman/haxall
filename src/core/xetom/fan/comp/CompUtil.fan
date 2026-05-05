@@ -65,8 +65,9 @@ class CompUtil
       Comp? slotComp := val as Comp
       slotSpec := compSpec.slot(slotName, false)
 
-      // do not encode transient slots
-      if (slotSpec?.isTransient ?: false) return
+      // if slot is transient and not linked, short-circuit
+      transient := slotSpec?.isTransient ?: false
+      if (transient && links.isEmpty) return
 
       // slot meta
       slotSpec?.metaOwn?.each |v, n|
@@ -93,7 +94,7 @@ class CompUtil
           childAst := Etc.dictToMap(doCompSaveToAstSlots(val, slotName, slotDepth, opts))
           // force dynamic slots to be maybe so they can be removed
           if (slotSpec == null) childAst["maybe"] = Marker.val
-          slot.addAll(childAst)
+          slot.setAll(childAst)
         }
       }
       else
@@ -126,7 +127,7 @@ class CompUtil
       if (!slot.isEmpty) slots.add(Etc.makeDict(slot))
     }
 
-    // echo("\n=== doCompSaveToAstSlots: depth=${depth} ${comp} ($name)")
+    // echo("\n=== doCompSaveToAstSlots: depth=${depth} ${comp} ($name) links=${comp.links}")
     // echo(ast)
     if (!slots.isEmpty)
     {
