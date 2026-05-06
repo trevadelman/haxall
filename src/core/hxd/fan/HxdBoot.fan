@@ -27,6 +27,23 @@ class HxdBoot : HxSysBoot
 // Construction
 //////////////////////////////////////////////////////////////////////////
 
+  ** Make boot for testing
+  static HxdBoot makeTest(File dir, Bool create, Dict projMeta := Etc.dict0)
+  {
+    boot := HxdBoot("test", dir)
+    {
+      it.createMeta = Etc.dictToMap(projMeta)
+      it.bootLibs.remove("hx.http")
+      it.bootLibs.add("hx.platform.serial")
+      if (Pod.find("hxIon", false) != null) it.bootLibs.add("hx.ion")
+      it.sysConfig["test"] = Marker.val
+      it.sysConfig["platformSerialSpi"] = "hxPlatformSerial::TestSerialSpi"
+      it.log.level = LogLevel.warn
+    }
+    if (create) { dir.delete; boot.create }
+    return boot
+  }
+
   ** Constructor
   new make(Str name, File dir) : super(name, dir)
   {

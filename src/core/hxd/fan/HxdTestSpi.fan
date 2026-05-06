@@ -20,25 +20,14 @@ class HxdTestSpi : HxTestSpi
 {
   new make(HxTest test) : super(test) {}
 
-  static Proj boot(File dir, Bool create, Dict projMeta := Etc.dict0)
+  static HxdBoot boot(File dir, Bool create, Dict projMeta := Etc.dict0)
   {
-    boot := HxdBoot("test", dir)
-    {
-      it.createMeta = Etc.dictToMap(projMeta)
-      it.bootLibs.remove("hx.http")
-      it.bootLibs.add("hx.platform.serial")
-      if (Pod.find("hxIon", false) != null) it.bootLibs.add("hx.ion")
-      it.sysConfig["test"] = Marker.val
-      it.sysConfig["platformSerialSpi"] = "hxPlatformSerial::TestSerialSpi"
-      it.log.level = LogLevel.warn
-    }
-    if (create) { dir.delete; boot.create }
-    return HxdSys(boot).init(boot).start
+    HxdBoot.makeTest(dir, create, projMeta)
   }
 
   override Proj start(Dict projMeta)
   {
-    boot(test.tempDir, true, projMeta)
+    boot(test.tempDir, true, projMeta).init.start
   }
 
   override Void stop(Proj proj)
@@ -49,7 +38,7 @@ class HxdTestSpi : HxTestSpi
   override Proj restart(Proj proj)
   {
     stop(proj)
-    return boot(proj.dir, false)
+    return boot(proj.dir, false).init.start
   }
 
   override Void addLib(Str libName)
