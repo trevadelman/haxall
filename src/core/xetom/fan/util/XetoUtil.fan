@@ -154,6 +154,12 @@ const class XetoUtil
     camelToDotted(name, '-')
   }
 
+  ** Convert "fooBarBaz" or "FooBarBaz" to "foo_bar_baz".
+  static Str camelToSnake(Str name)
+  {
+    camelToDotted(name, '_')
+  }
+
   ** Convert "foo.bar.baz" to "fooBarBaz"
   static Str dottedToCamel(Str name, Int dot := '.')
   {
