@@ -38,6 +38,9 @@ abstract const class HxConsole : Console
   ** Run a callback within a context.  This can only be used
   ** if the process with started with the '-noAuth' flag.
   abstract Obj? inContext(|Context->Obj?| cx)
+
+  ** Set flag to exit the VM on the next cycle
+  abstract Void quit()
 }
 
 **************************************************************************

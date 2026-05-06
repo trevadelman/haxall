@@ -28,6 +28,7 @@ const class HxmConsole : HxConsole
   new make(Sys sys)
   {
     this.sys  = sys
+    this.projRef.val = sys as Proj
     this.base = Console.cur
   }
 
@@ -85,6 +86,9 @@ const class HxmConsole : HxConsole
     return rt.newContext(user).asCur |cx| { f(cx) }
   }
 
+  override Void quit() { isRunning.val = false }
+  private const AtomicBool isRunning := AtomicBool(true)
+
   ** Debug dump given object
   private Void dump(Obj? x)
   {
@@ -98,16 +102,16 @@ const class HxmConsole : HxConsole
 
   override Int run()
   {
-    while (true)
+    while (isRunning.val)
     {
       try
       {
         // prompt
-        input := doPrompt.trim
+        input := prompt("$rt.name>")
 
         // if empty/quit
-        if (input.isEmpty) continue
-        if (input == "quit" || input == "q") return 0
+        if (input == null || input.isEmpty) continue
+        if (input == "quit" || input == "q") { quit; continue }
 
         // get command name
         name := input
@@ -149,12 +153,12 @@ const class HxmConsole : HxConsole
     return 0
   }
 
-  ** Prompt user for input
-  private Str doPrompt()
+  ** Prompt user for input and handle multi-line input
+  override Str? prompt(Str msg := "")
   {
     // prompt for one or more lines
-    prompt := "$rt.name>"
-    input := Env.cur.prompt(prompt+" ").trim
+    input := Env.cur.prompt(msg+" ").trim
+    if (input.isEmpty) return null
 
     // if it looks like expression is incomplete, then
     // prompt for additional lines until empty
@@ -163,7 +167,7 @@ const class HxmConsole : HxConsole
       x := addLine(StrBuf(), input)
       while (true)
       {
-        next := Env.cur.prompt(".".mult(prompt.size)+" ")
+        next := Env.cur.prompt(".".mult(msg.size)+" ")
         if (next.trim.isEmpty) break
         addLine(x, next)
       }
@@ -214,8 +218,6 @@ const class HxmConsole : HxConsole
 
   override This groupEnd() { base.groupEnd; return this }
 
-  override Str? prompt(Str msg := "") { base.prompt(msg) }
-
   override Str? promptPassword(Str msg := "") { base.promptPassword(msg) }
 
 //////////////////////////////////////////////////////////////////////////
@@ -223,9 +225,7 @@ const class HxmConsole : HxConsole
 //////////////////////////////////////////////////////////////////////////
 
   @HxmConsoleCmd { help="Shutdown and exit"; aliases=["q"] }
-  Void onQuit(Str input)
-  {
-  }
+  Void onQuit(Str input) { quit }
 
   @HxmConsoleCmd { help="Command help"; aliases=["?"]
     usage="""help        List all commands
