@@ -274,31 +274,7 @@ class JsonSchemaExporter : Exporter
 
   private Void doSpecGrid(Spec spec, Str? doc)
   {
-    addDef(
-      spec, doc,
-      [
-        "additionalProperties": true,
-        "type": "object",
-        "properties": [
-          "meta": [
-            "type": "object"
-          ],
-          "rows": [
-            "type": "array",
-            "items": [
-              "type": "object"
-            ]
-          ],
-          "cols": [
-            "type": "array",
-            "items": ref(spec.lib, "GridCol")
-          ]
-        ],
-        "required": [
-          "cols",
-          "rows"
-        ]
-      ])
+    addDef(spec, doc, gridSchema(spec, Obj:Obj["type": "object"]))
 
     addDef(
       spec, null,
@@ -488,8 +464,51 @@ class JsonSchemaExporter : Exporter
       return res
     }
 
+    // grid -> grid envelope refined with typed rows
+    if (slot.type.isGrid)
+    {
+      of := slot.of(false)
+      if (of != null) return gridOf(slot.type, of)
+    }
+
     // anything else
     return ensureRef(slot.type)
+  }
+
+  ** Grid<of:X> stamps the grid envelope inline with rows typed as the of
+  ** spec.  Inline rather than allOf refinement: generators merge allOf
+  ** properties base-first, which would keep the generic untyped rows.
+  ** An unparameterized Grid keeps the generic $defs entry.
+  private Obj:Obj gridOf(Spec grid, Spec of)
+  {
+    ensureRef(grid) // register generic Grid and its GridCol
+    return gridSchema(grid, ensureRef(of))
+  }
+
+  ** Grid envelope schema with the given rows item schema
+  private Obj:Obj gridSchema(Spec grid, Obj:Obj rowItems)
+  {
+    return Obj:Obj[
+      "additionalProperties": true,
+      "type": "object",
+      "properties": [
+        "meta": [
+          "type": "object"
+        ],
+        "rows": [
+          "type": "array",
+          "items": rowItems
+        ],
+        "cols": [
+          "type": "array",
+          "items": ref(grid.lib, "GridCol")
+        ]
+      ],
+      "required": [
+        "cols",
+        "rows"
+      ]
+    ]
   }
 
   private Void addDef(Spec spec, Str? doc, Obj:Obj schema, Str? syntheticName := null)

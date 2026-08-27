@@ -249,6 +249,47 @@ class JsonSchemaTest : AbstractXetoTest
     verifyEq(((Obj:Obj)props["plain"])["x-xeto"], null)     // nothing to add
   }
 
+  Void testGridOf()
+  {
+    ns := createNamespace(["sys"])
+
+    src :=
+      Str<|Reading: {
+             val: sys::Number,
+             ts: sys::DateTime
+           }
+           History: Func {
+             id: sys::Ref,
+             returns: Grid <of:Reading>
+           }
+           Report: Func {
+             range: sys::Str,
+             returns: Grid
+           }|>
+    lib := ns.compileTempLib(src)
+
+    // Grid<of:X> stamps the envelope inline with rows typed as the of spec
+    ex := JsonSchemaExporter(ns, Buf().out, Etc.dict0)
+    schema := ex.prop(lib.type("History").slot("returns"))
+    props := (Obj:Obj)schema.getChecked("properties")
+    verifyEq(((Obj:Obj)props.getChecked("rows"))["items"],
+             Obj:Obj["\$ref": "#/\$defs/${lib.name}.Reading"])
+    verifyEq(((Obj:Obj)props.getChecked("cols"))["items"],
+             Obj:Obj["\$ref": "#/\$defs/sys.GridCol"])
+    // "of" rides in x-xeto since the envelope has no top-level items
+    verifyEq(schema["x-xeto"], Str:Obj["of": "${lib.name}::Reading"])
+    verifyAllRefsResolved(schema, ex.defs)
+
+    // an unparameterized Grid keeps the generic def with untyped rows
+    ex = JsonSchemaExporter(ns, Buf().out, Etc.dict0)
+    schema = ex.prop(lib.type("Report").slot("returns"))
+    verifyEq(schema, Obj:Obj["\$ref": "#/\$defs/sys.Grid"])
+    genericRows := (Obj:Obj)((Obj:Obj)((Obj:Obj)ex.defs.getChecked("sys.Grid"))
+      .getChecked("properties")).getChecked("rows")
+    verifyEq(genericRows["items"], Obj:Obj["type": "object"])
+    verifyAllRefsResolved(schema, ex.defs)
+  }
+
   Void testNullable()
   {
     ns := createNamespace(["sys"])
